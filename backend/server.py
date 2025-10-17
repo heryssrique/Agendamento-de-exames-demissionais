@@ -510,14 +510,24 @@ async def set_department(
     dept: DepartmentSelection,
     current_user: User = Depends(get_current_user)
 ):
-    """Set user's department (DP or RH)"""
-    if dept.department not in ["DP", "RH"]:
-        raise HTTPException(status_code=400, detail="Department must be 'DP' or 'RH'")
+    """Set user's department (DP or RH or ADMIN)"""
+    if dept.department not in ["DP", "RH", "ADMIN"]:
+        raise HTTPException(status_code=400, detail="Department must be 'DP', 'RH', or 'ADMIN'")
+    
+    # Check if user is authorized to be ADMIN
+    if dept.department == "ADMIN":
+        if current_user.email.lower() not in ADMIN_EMAILS:
+            raise HTTPException(
+                status_code=403,
+                detail="You are not authorized to be an administrator"
+            )
     
     await db.users.update_one(
         {"id": current_user.id},
         {"$set": {"department": dept.department}}
     )
+    
+    logger.info(f"User {current_user.email} set department to {dept.department}")
     
     return {"message": "Department updated", "department": dept.department}
 
