@@ -505,6 +505,12 @@ async def get_me(current_user: User = Depends(get_current_user)):
     """Get current user information"""
     return current_user
 
+@api_router.get("/auth/can-be-admin")
+async def can_be_admin(current_user: User = Depends(get_current_user)):
+    """Check if current user can be admin"""
+    is_authorized = current_user.email.lower() in ADMIN_EMAILS
+    return {"can_be_admin": is_authorized}
+
 @api_router.post("/auth/department")
 async def set_department(
     dept: DepartmentSelection,
