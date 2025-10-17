@@ -617,6 +617,9 @@ async def update_exam_request(
         if current_user.department == "DP" and exam['created_by'] != current_user.id:
             raise HTTPException(status_code=403, detail="Access denied")
         
+        # Store old status to detect changes
+        old_status = exam['status']
+        
         # Prepare update
         update_data = {k: v for k, v in update.model_dump().items() if v is not None}
         update_data['updated_at'] = datetime.now(timezone.utc)
@@ -626,6 +629,9 @@ async def update_exam_request(
             {"id": exam_id},
             {"$set": update_data}
         )
+        
+        # Get updated exam for notifications
+        updated_exam = await db.exam_requests.find_one({"id": exam_id}, {"_id": 0})
         
         # Update Trello card if status changed
         if update.status and exam.get('trello_card_id'):
@@ -648,6 +654,27 @@ async def update_exam_request(
                     new_desc += f"\nObservações: {update.observacoes}"
                 
                 await trello_service.update_card(exam['trello_card_id'], description=new_desc)
+        
+        # 📧 Send email notifications based on status change
+        try:
+            if update.status and update.status != old_status:
+                # Get DP user who created the request
+                dp_user = await db.users.find_one({"id": exam['created_by']}, {"_id": 0})
+                
+                if dp_user:
+                    # Notify DP when RH schedules exam
+                    if update.status == "EM_AGENDAMENTO":
+                        await email_service.notify_dp_exam_scheduled(updated_exam, dp_user)
+                        logger.info(f"Exam scheduled notification sent to {dp_user['email']}")
+                    
+                    # Notify DP when result is available
+                    elif update.status in ["APTO", "INAPTO"]:
+                        await email_service.notify_dp_exam_result(updated_exam, dp_user)
+                        logger.info(f"Exam result notification sent to {dp_user['email']}")
+        
+        except Exception as email_error:
+            logger.error(f"Error sending email notification: {email_error}")
+            # Don't fail the request if email fails
         
         return {"message": "Exam request updated successfully"}
     
