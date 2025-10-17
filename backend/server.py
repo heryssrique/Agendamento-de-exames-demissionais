@@ -99,6 +99,9 @@ class ExamRequestUpdate(BaseModel):
     data_agendamento: Optional[str] = None
     observacoes: Optional[str] = None
 
+class UserUpdate(BaseModel):
+    department: str  # "DP", "RH", or "ADMIN"
+
 # ==================== TRELLO SERVICE ====================
 
 class TrelloService:
