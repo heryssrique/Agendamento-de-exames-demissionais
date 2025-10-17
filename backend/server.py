@@ -40,6 +40,10 @@ SMTP_PASSWORD = os.environ.get('SMTP_PASSWORD')
 SMTP_FROM_EMAIL = os.environ.get('SMTP_FROM_EMAIL')
 SMTP_FROM_NAME = os.environ.get('SMTP_FROM_NAME', 'Sistema de Exames')
 
+# Admin Configuration
+ADMIN_EMAILS = os.environ.get('ADMIN_EMAILS', '').split(',')
+ADMIN_EMAILS = [email.strip().lower() for email in ADMIN_EMAILS if email.strip()]
+
 # Thread pool for sending emails
 email_executor = ThreadPoolExecutor(max_workers=3)
 
