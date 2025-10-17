@@ -5,6 +5,7 @@ import Login from "./pages/Login";
 import DepartmentSelection from "./pages/DepartmentSelection";
 import DPDashboard from "./pages/DPDashboard";
 import RHDashboard from "./pages/RHDashboard";
+import AdminDashboard from "./pages/AdminDashboard";
 import "@/App.css";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -54,8 +55,12 @@ function App() {
               <DepartmentSelection user={user} onUpdate={checkAuth} />
             ) : user.department === "DP" ? (
               <Navigate to="/dp/dashboard" replace />
-            ) : (
+            ) : user.department === "RH" ? (
               <Navigate to="/rh/dashboard" replace />
+            ) : user.department === "ADMIN" ? (
+              <Navigate to="/admin/dashboard" replace />
+            ) : (
+              <Navigate to="/" replace />
             )
           }
         />
@@ -74,6 +79,16 @@ function App() {
           element={
             user && user.department === "RH" ? (
               <RHDashboard user={user} onLogout={checkAuth} />
+            ) : (
+              <Navigate to="/" replace />
+            )
+          }
+        />
+        <Route
+          path="/admin/dashboard"
+          element={
+            user && user.department === "ADMIN" ? (
+              <AdminDashboard user={user} onLogout={checkAuth} />
             ) : (
               <Navigate to="/" replace />
             )
