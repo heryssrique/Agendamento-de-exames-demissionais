@@ -289,7 +289,10 @@ async def create_session(request: Request, response: Response):
             session_token=session_token,
             expires_at=expires_at
         )
-        await db.user_sessions.insert_one(session.model_dump())
+        
+        # Save session with proper datetime serialization
+        session_dict = session.model_dump()
+        await db.user_sessions.insert_one(session_dict)
         
         # Set httpOnly cookie
         response.set_cookie(
