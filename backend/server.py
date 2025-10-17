@@ -532,6 +532,57 @@ async def logout(
     response.delete_cookie(key="session_token", path="/")
     return {"message": "Logged out successfully"}
 
+# ==================== ADMIN ROUTES ====================
+
+@api_router.get("/admin/users", response_model=List[User])
+async def list_all_users(admin_user: User = Depends(require_admin)):
+    """List all users (Admin only)"""
+    try:
+        users = await db.users.find({}, {"_id": 0}).to_list(1000)
+        return users
+    except Exception as e:
+        logger.error(f"Error listing users: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list users")
+
+@api_router.patch("/admin/users/{user_id}")
+async def update_user_department(
+    user_id: str,
+    update: UserUpdate,
+    admin_user: User = Depends(require_admin)
+):
+    """Update user department (Admin only)"""
+    try:
+        if update.department not in ["DP", "RH", "ADMIN"]:
+            raise HTTPException(
+                status_code=400,
+                detail="Department must be 'DP', 'RH', or 'ADMIN'"
+            )
+        
+        # Check if user exists
+        user = await db.users.find_one({"id": user_id}, {"_id": 0})
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Update department
+        await db.users.update_one(
+            {"id": user_id},
+            {"$set": {"department": update.department}}
+        )
+        
+        logger.info(f"Admin {admin_user.email} changed user {user['email']} department to {update.department}")
+        
+        return {
+            "message": "User department updated successfully",
+            "user_id": user_id,
+            "new_department": update.department
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating user department: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update user department")
+
 # ==================== EXAM ROUTES ====================
 
 @api_router.post("/exams", response_model=ExamRequest)
