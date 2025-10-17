@@ -212,6 +212,157 @@ class TrelloService:
 
 trello_service = TrelloService()
 
+# ==================== EMAIL SERVICE ====================
+
+class EmailService:
+    def __init__(self):
+        self.smtp_host = SMTP_HOST
+        self.smtp_port = SMTP_PORT
+        self.smtp_user = SMTP_USER
+        self.smtp_password = SMTP_PASSWORD
+        self.from_email = SMTP_FROM_EMAIL
+        self.from_name = SMTP_FROM_NAME
+    
+    def send_email_sync(self, to_email: str, subject: str, body: str):
+        """Send email synchronously (called from thread pool)"""
+        try:
+            msg = MIMEMultipart('alternative')
+            msg['From'] = f"{self.from_name} <{self.from_email}>"
+            msg['To'] = to_email
+            msg['Subject'] = subject
+            
+            # HTML body
+            html_part = MIMEText(body, 'html')
+            msg.attach(html_part)
+            
+            # Connect and send
+            with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
+                server.starttls()
+                server.login(self.smtp_user, self.smtp_password)
+                server.send_message(msg)
+            
+            logger.info(f"Email sent to {to_email}: {subject}")
+            return True
+        except Exception as e:
+            logger.error(f"Error sending email to {to_email}: {e}")
+            return False
+    
+    async def send_email(self, to_email: str, subject: str, body: str):
+        """Send email asynchronously"""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            email_executor,
+            self.send_email_sync,
+            to_email,
+            subject,
+            body
+        )
+    
+    async def notify_rh_new_request(self, exam: dict, rh_users: List[dict]):
+        """Notify RH users about new exam request"""
+        subject = f"Nova Solicitação de Exame - {exam['nome']}"
+        
+        body = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+            <div style="max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9; border-radius: 10px;">
+                <h2 style="color: #4F46E5;">📋 Nova Solicitação de Exame Demissional</h2>
+                
+                <div style="background-color: white; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                    <p><strong>Matrícula:</strong> {exam['matricula']}</p>
+                    <p><strong>Nome:</strong> {exam['nome']}</p>
+                    <p><strong>Data de Desligamento:</strong> {exam['data_desligamento']}</p>
+                    <p><strong>Status:</strong> <span style="background-color: #DBEAFE; color: #1E40AF; padding: 4px 12px; border-radius: 12px;">Aguardando Agendamento</span></p>
+                </div>
+                
+                <p style="margin-top: 20px;">Por favor, acesse o sistema para agendar o exame.</p>
+                
+                <a href="https://trello-integra.preview.emergentagent.com" 
+                   style="display: inline-block; background-color: #4F46E5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin-top: 10px;">
+                    Acessar Sistema
+                </a>
+            </div>
+        </body>
+        </html>
+        """
+        
+        for rh_user in rh_users:
+            await self.send_email(rh_user['email'], subject, body)
+    
+    async def notify_dp_exam_scheduled(self, exam: dict, dp_user: dict):
+        """Notify DP user that exam was scheduled"""
+        subject = f"Exame Agendado - {exam['nome']}"
+        
+        body = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+            <div style="max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9; border-radius: 10px;">
+                <h2 style="color: #059669;">✅ Exame Agendado</h2>
+                
+                <div style="background-color: white; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                    <p><strong>Matrícula:</strong> {exam['matricula']}</p>
+                    <p><strong>Nome:</strong> {exam['nome']}</p>
+                    <p><strong>Data do Exame:</strong> {exam.get('data_agendamento', 'A definir')}</p>
+                    <p><strong>Status:</strong> <span style="background-color: #FEF3C7; color: #92400E; padding: 4px 12px; border-radius: 12px;">Em Agendamento</span></p>
+                </div>
+                
+                {f'<p><strong>Observações:</strong> {exam.get("observacoes", "")}</p>' if exam.get('observacoes') else ''}
+                
+                <a href="https://trello-integra.preview.emergentagent.com" 
+                   style="display: inline-block; background-color: #059669; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin-top: 10px;">
+                    Ver Detalhes
+                </a>
+            </div>
+        </body>
+        </html>
+        """
+        
+        await self.send_email(dp_user['email'], subject, body)
+    
+    async def notify_dp_exam_result(self, exam: dict, dp_user: dict):
+        """Notify DP user about exam result"""
+        is_apto = exam['status'] == 'APTO'
+        result_text = 'APTO' if is_apto else 'INAPTO'
+        result_color = '#059669' if is_apto else '#DC2626'
+        result_bg = '#D1FAE5' if is_apto else '#FEE2E2'
+        
+        subject = f"Resultado do Exame - {exam['nome']} - {result_text}"
+        
+        body = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+            <div style="max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9; border-radius: 10px;">
+                <h2 style="color: {result_color};">📊 Resultado do Exame Demissional</h2>
+                
+                <div style="background-color: white; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                    <p><strong>Matrícula:</strong> {exam['matricula']}</p>
+                    <p><strong>Nome:</strong> {exam['nome']}</p>
+                    <p><strong>Data do Exame:</strong> {exam.get('data_agendamento', 'Não informada')}</p>
+                    <p style="margin-top: 20px;">
+                        <strong>Resultado:</strong> 
+                        <span style="background-color: {result_bg}; color: {result_color}; padding: 8px 16px; border-radius: 12px; font-size: 18px; font-weight: bold;">
+                            {result_text}
+                        </span>
+                    </p>
+                </div>
+                
+                {f'<p><strong>Observações:</strong> {exam.get("observacoes", "")}</p>' if exam.get('observacoes') else ''}
+                
+                <p style="margin-top: 20px;">Acesse o sistema para mais detalhes e finalize o processo.</p>
+                
+                <a href="https://trello-integra.preview.emergentagent.com" 
+                   style="display: inline-block; background-color: {result_color}; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin-top: 10px;">
+                    Acessar Sistema
+                </a>
+            </div>
+        </body>
+        </html>
+        """
+        
+        await self.send_email(dp_user['email'], subject, body)
+
+email_service = EmailService()
+
 # ==================== AUTH DEPENDENCIES ====================
 
 async def get_current_user(
