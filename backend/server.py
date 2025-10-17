@@ -545,6 +545,23 @@ async def create_exam_request(
         # Save to database
         await db.exam_requests.insert_one(exam_request.model_dump())
         
+        # 📧 Send email notification to RH users
+        try:
+            rh_users = await db.users.find({"department": "RH"}, {"_id": 0}).to_list(100)
+            if rh_users:
+                await email_service.notify_rh_new_request(exam_request.model_dump(), rh_users)
+                logger.info(f"Email notifications sent to {len(rh_users)} RH users")
+        except Exception as email_error:
+            logger.error(f"Error sending email notifications: {email_error}")
+            # Don't fail the request if email fails
+        
+        return exam_request
+    
+    except Exception as e:
+        logger.error(f"Error creating exam request: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create exam request")
+        await db.exam_requests.insert_one(exam_request.model_dump())
+        
         return exam_request
     
     except Exception as e:
