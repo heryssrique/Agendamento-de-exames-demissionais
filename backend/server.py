@@ -230,7 +230,7 @@ async def get_current_user(
     
     return User(**user)
 
-async def require_department(required_dept: str):
+def require_department(required_dept: str):
     """Dependency to require specific department"""
     async def department_checker(current_user: User = Depends(get_current_user)):
         if current_user.department != required_dept:
