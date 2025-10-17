@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import axios from "axios";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -6,6 +6,8 @@ const API = `${BACKEND_URL}/api`;
 const AUTH_URL = "https://auth.emergentagent.com";
 
 function Login({ onLogin }) {
+  const [processing, setProcessing] = useState(false);
+
   useEffect(() => {
     // Check for session_id in URL fragment
     const fragment = window.location.hash;
@@ -16,14 +18,19 @@ function Login({ onLogin }) {
   }, []);
 
   const processSessionId = async (sessionId) => {
+    setProcessing(true);
     try {
-      await axios.post(
+      console.log("Processing session_id...");
+      const response = await axios.post(
         `${API}/auth/session`,
         {},
         {
           headers: { "X-Session-ID": sessionId },
+          withCredentials: true
         }
       );
+      
+      console.log("Session created:", response.data);
       
       // Clean URL fragment
       window.history.replaceState(null, "", window.location.pathname);
@@ -32,12 +39,27 @@ function Login({ onLogin }) {
       onLogin();
     } catch (error) {
       console.error("Authentication failed:", error);
+      console.error("Error details:", error.response?.data);
       alert("Falha na autenticação. Por favor, tente novamente.");
+      setProcessing(false);
     }
   };
 
   const handleGoogleLogin = () => {
     const redirectUrl = encodeURIComponent(window.location.origin);
+    window.location.href = `${AUTH_URL}/?redirect=${redirectUrl}`;
+  };
+
+  if (processing) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-xl p-8 text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Processando autenticação...</p>
+        </div>
+      </div>
+    );
+  }
     window.location.href = `${AUTH_URL}/?redirect=${redirectUrl}`;
   };
 
