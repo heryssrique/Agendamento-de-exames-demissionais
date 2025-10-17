@@ -12,6 +12,11 @@ import uuid
 from datetime import datetime, timezone, timedelta
 import requests
 import httpx
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -26,6 +31,17 @@ TRELLO_API_KEY = os.environ.get('TRELLO_API_KEY')
 TRELLO_TOKEN = os.environ.get('TRELLO_TOKEN')
 TRELLO_BOARD_ID = os.environ.get('TRELLO_BOARD_ID')
 TRELLO_BASE_URL = "https://api.trello.com/1"
+
+# Email Configuration
+SMTP_HOST = os.environ.get('SMTP_HOST')
+SMTP_PORT = int(os.environ.get('SMTP_PORT', 587))
+SMTP_USER = os.environ.get('SMTP_USER')
+SMTP_PASSWORD = os.environ.get('SMTP_PASSWORD')
+SMTP_FROM_EMAIL = os.environ.get('SMTP_FROM_EMAIL')
+SMTP_FROM_NAME = os.environ.get('SMTP_FROM_NAME', 'Sistema de Exames')
+
+# Thread pool for sending emails
+email_executor = ThreadPoolExecutor(max_workers=3)
 
 # Create the main app without a prefix
 app = FastAPI()
