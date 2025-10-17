@@ -425,9 +425,6 @@ async def require_admin(current_user: User = Depends(get_current_user)):
             detail="Access denied. Admin privileges required"
         )
     return current_user
-            )
-        return current_user
-    return department_checker
 
 # ==================== AUTH ROUTES ====================
 
