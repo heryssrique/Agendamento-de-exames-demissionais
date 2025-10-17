@@ -417,6 +417,18 @@ def require_department(required_dept: str):
         return current_user
     return department_checker
 
+async def require_admin(current_user: User = Depends(get_current_user)):
+    """Dependency to require admin access"""
+    if current_user.department != "ADMIN":
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied. Admin privileges required"
+        )
+    return current_user
+            )
+        return current_user
+    return department_checker
+
 # ==================== AUTH ROUTES ====================
 
 @api_router.post("/auth/session")
