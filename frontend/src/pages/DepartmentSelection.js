@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import axios from "axios";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -6,6 +6,21 @@ const API = `${BACKEND_URL}/api`;
 
 function DepartmentSelection({ user, onUpdate }) {
   const [loading, setLoading] = useState(false);
+  const [canBeAdmin, setCanBeAdmin] = useState(false);
+
+  useEffect(() => {
+    checkAdminPermission();
+  }, []);
+
+  const checkAdminPermission = async () => {
+    try {
+      const response = await axios.get(`${API}/auth/can-be-admin`);
+      setCanBeAdmin(response.data.can_be_admin);
+    } catch (error) {
+      console.error("Error checking admin permission:", error);
+      setCanBeAdmin(false);
+    }
+  };
 
   const selectDepartment = async (dept) => {
     setLoading(true);
@@ -14,7 +29,11 @@ function DepartmentSelection({ user, onUpdate }) {
       onUpdate();
     } catch (error) {
       console.error("Failed to set department:", error);
-      alert("Erro ao selecionar setor. Tente novamente.");
+      if (error.response?.status === 403) {
+        alert("❌ Você não tem permissão para ser Administrador.");
+      } else {
+        alert("Erro ao selecionar setor. Tente novamente.");
+      }
     } finally {
       setLoading(false);
     }
