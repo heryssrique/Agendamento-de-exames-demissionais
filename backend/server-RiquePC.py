@@ -17,7 +17,6 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-import re
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -50,15 +49,6 @@ email_executor = ThreadPoolExecutor(max_workers=3)
 
 # Create the main app without a prefix
 app = FastAPI()
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[],
-    allow_origin_regex=re.compile(r"^https?://(localhost|127\.0\.0\.1)(:\d+$)?"),
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
@@ -100,8 +90,6 @@ class UserSession(BaseModel):
     session_token: str
     expires_at: datetime
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    # When an ADMIN is temporarily acting as a sector (DP/RH), we store it here
-    impersonate_department: Optional[str] = None  # "DP" or "RH"
 
 class DepartmentSelection(BaseModel):
     department: str  # "DP" or "RH"
@@ -132,11 +120,6 @@ class ExamRequestUpdate(BaseModel):
 
 class UserUpdate(BaseModel):
     department: str  # "DP", "RH", or "ADMIN"
-
-class DevLoginRequest(BaseModel):
-    email: str
-    name: str
-    department: Optional[str] = None  # optional; defaults to existing or None
 
 # ==================== TRELLO SERVICE ====================
 
@@ -439,12 +422,8 @@ async def get_current_user(
     user = await db.users.find_one({"id": session['user_id']}, {"_id": 0})
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    # Apply impersonation department if present in session
-    effective_user = User(**user)
-    imp_dept = session.get("impersonate_department")
-    if imp_dept in ["DP", "RH"]:
-        effective_user.department = imp_dept
-    return effective_user
+    
+    return User(**user)
 
 def require_department(required_dept: str):
     """Dependency to require specific department"""
@@ -540,71 +519,6 @@ async def create_session(request: Request, response: Response):
         logger.error(f"Session creation error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@api_router.post("/auth/dev-login")
-async def dev_login(payload: DevLoginRequest, response: Response):
-    """DEV ONLY: cria sessão local sem provedor externo.
-    Habilite com env DEV_AUTH_ENABLED=true.
-    Permite definir `department`; se for "ADMIN" exige estar em ADMIN_EMAILS.
-    """
-    if os.environ.get("DEV_AUTH_ENABLED", "false").lower() != "true":
-        raise HTTPException(status_code=404, detail="Not Found")
-
-    try:
-        # upsert user
-        existing = await db.users.find_one({"email": payload.email.lower()}, {"_id": 0})
-        if existing:
-            # optionally update name/department
-            update_set = {}
-            if payload.name and payload.name != existing.get("name"):
-                update_set["name"] = payload.name
-            if payload.department:
-                if payload.department == "ADMIN" and payload.email.lower() not in ADMIN_EMAILS:
-                    raise HTTPException(status_code=403, detail="You are not authorized to be an administrator")
-                update_set["department"] = payload.department
-            if update_set:
-                await db.users.update_one({"email": payload.email.lower()}, {"$set": update_set})
-            user = await db.users.find_one({"email": payload.email.lower()}, {"_id": 0})
-        else:
-            dept = payload.department
-            if dept == "ADMIN" and payload.email.lower() not in ADMIN_EMAILS:
-                raise HTTPException(status_code=403, detail="You are not authorized to be an administrator")
-            user = User(
-                email=payload.email.lower(),
-                name=payload.name,
-                department=dept
-            ).model_dump()
-            await db.users.insert_one(user)
-
-        # create session
-        session_token = str(uuid.uuid4())
-        expires_at = datetime.now(timezone.utc) + timedelta(days=7)
-        session = UserSession(
-            user_id=user["id"],
-            session_token=session_token,
-            expires_at=expires_at
-        ).model_dump()
-        await db.user_sessions.insert_one(session)
-
-        # set cookie
-        secure = COOKIE_SECURE
-        samesite = "none" if secure else "lax"
-        response.set_cookie(
-            key="session_token",
-            value=session_token,
-            httponly=True,
-            secure=secure,
-            samesite=samesite,
-            path="/",
-            max_age=7*24*60*60
-        )
-
-        return {"user": user, "session_token": session_token}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Dev login error: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
 @api_router.get("/auth/me")
 async def get_me(current_user: User = Depends(get_current_user)):
     """Get current user information"""
@@ -615,27 +529,6 @@ async def can_be_admin(current_user: User = Depends(get_current_user)):
     """Check if current user can be admin"""
     is_authorized = current_user.email.lower() in ADMIN_EMAILS
     return {"can_be_admin": is_authorized}
-
-@api_router.get("/auth/impersonation-status")
-async def impersonation_status(
-    authorization: Optional[str] = Cookie(None, alias="session_token"),
-    auth_header: Optional[str] = Header(None, alias="Authorization"),
-    current_user: User = Depends(get_current_user)
-):
-    """Return whether current session is impersonating a sector and which one."""
-    session_token = authorization
-    if not session_token and auth_header and auth_header.startswith("Bearer "):
-        session_token = auth_header.replace("Bearer ", "")
-    if not session_token:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-    session = await db.user_sessions.find_one({"session_token": session_token}, {"_id": 0})
-    imp = session.get("impersonate_department") if session else None
-    return {
-        "is_impersonating": imp in ["DP", "RH"],
-        "impersonate_department": imp if imp in ["DP", "RH"] else None,
-        "effective_department": current_user.department,
-    }
 
 @api_router.post("/auth/department")
 async def set_department(
@@ -662,58 +555,6 @@ async def set_department(
     logger.info(f"User {current_user.email} set department to {dept.department}")
     
     return {"message": "Department updated", "department": dept.department}
-
-@api_router.post("/auth/impersonate-department")
-async def impersonate_department(
-    dept: DepartmentSelection,
-    response: Response,
-    admin_user: User = Depends(require_admin),
-    authorization: Optional[str] = Cookie(None, alias="session_token"),
-    auth_header: Optional[str] = Header(None, alias="Authorization")
-):
-    """ADMIN only: start acting as a sector (DP/RH) in this session without changing stored user department."""
-    if dept.department not in ["DP", "RH"]:
-        raise HTTPException(status_code=400, detail="Department must be 'DP' or 'RH'")
-
-    # Determine session token
-    session_token = authorization
-    if not session_token and auth_header and auth_header.startswith("Bearer "):
-        session_token = auth_header.replace("Bearer ", "")
-    if not session_token:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-    # Update current session with impersonation flag
-    await db.user_sessions.update_one(
-        {"session_token": session_token},
-        {"$set": {"impersonate_department": dept.department}}
-    )
-
-    logger.info(f"Admin {admin_user.email} is impersonating department {dept.department}")
-
-    return {"message": "Impersonation started", "impersonate_department": dept.department}
-
-@api_router.post("/auth/stop-impersonation")
-async def stop_impersonation(
-    response: Response,
-    authorization: Optional[str] = Cookie(None, alias="session_token"),
-    auth_header: Optional[str] = Header(None, alias="Authorization"),
-    current_user: User = Depends(get_current_user)
-):
-    """Stop acting as a sector in this session. Works even while impersonating."""
-    # Determine session token
-    session_token = authorization
-    if not session_token and auth_header and auth_header.startswith("Bearer "):
-        session_token = auth_header.replace("Bearer ", "")
-    if not session_token:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-    await db.user_sessions.update_one(
-        {"session_token": session_token},
-        {"$unset": {"impersonate_department": ""}}
-    )
-
-    logger.info("Stopped impersonation for current session")
-    return {"message": "Impersonation stopped"}
 
 @api_router.post("/auth/logout")
 async def logout(
@@ -913,166 +754,6 @@ async def trello_cards_by_list_name(name: str, current_user: User = Depends(get_
         logger.error(f"Trello cards-by-list-name error: {e}")
         raise HTTPException(status_code=502, detail="Failed to fetch Trello cards by list name")
 
-# ==================== TRELLO <-> DASHBOARD SYNC ====================
-
-# Centralize mapping between statuses and Trello list names
-STATUS_TO_LIST = {
-    "EM_AGENDAMENTO": "Em Agendamento (RH)",
-    "AGUARDANDO_RESULTADO": "Aguardando Resultado",
-    "APTO": "Apto",
-    "INAPTO": "Inapto",
-}
-
-LIST_TO_STATUS = {v: k for k, v in STATUS_TO_LIST.items()}
-
-def _parse_card_desc(desc: str) -> dict:
-    """Parse Trello card description generated by this app into fields.
-    Expected lines (Portuguese):
-      Matrícula: 123
-      Nome: Fulano
-      Data Desligamento: 2025-01-10
-      Status: CRIADO|EM_AGENDAMENTO|AGUARDANDO_RESULTADO|APTO|INAPTO
-      Data Agendamento: 2025-01-15 (opcional)
-      Observações: ... (opcional)
-    """
-    if not desc:
-        return {}
-    result = {}
-    try:
-        for raw_line in desc.splitlines():
-            line = raw_line.strip()
-            if not line or ":" not in line:
-                continue
-            key, value = line.split(":", 1)
-            key = key.strip().lower()
-            value = value.strip()
-            if key == "matrícula" or key == "matricula":
-                result["matricula"] = value
-            elif key == "nome":
-                result["nome"] = value
-            elif key == "data desligamento" or key == "data_desligamento":
-                result["data_desligamento"] = value
-            elif key == "status":
-                result["status"] = value
-            elif key == "data agendamento" or key == "data_agendamento":
-                result["data_agendamento"] = value
-            elif key == "observações" or key == "observacoes":
-                result["observacoes"] = value
-    except Exception as e:
-        logger.warning(f"Failed parsing Trello desc: {e}")
-    return result
-
-@api_router.head("/trello/webhook")
-async def trello_webhook_verify():
-    """Trello calls HEAD on the callback URL to verify reachability."""
-    return Response(status_code=200)
-
-@api_router.post("/trello/webhook")
-async def trello_webhook(request: Request):
-    """Receive Trello webhook events and update local DB accordingly.
-
-    This handler updates `exam_requests` when the associated Trello card is moved
-    across lists (status change) or when description is edited (fields sync).
-    """
-    try:
-        payload = await request.json()
-        action = payload.get("action", {})
-        card = action.get("data", {}).get("card", {})
-        card_id = card.get("id")
-        if not card_id:
-            return {"ignored": True}
-
-        # Locate exam by trello_card_id
-        exam = await db.exam_requests.find_one({"trello_card_id": card_id}, {"_id": 0})
-        if not exam:
-            # Not created by our system or not linked
-            return {"ignored": True}
-
-        update_fields = {}
-        action_type = action.get("type")
-
-        # Card moved to another list -> status update
-        if action_type == "updateCard":
-            data = action.get("data", {})
-            if "listAfter" in data and data.get("listAfter", {}).get("name"):
-                list_name = data["listAfter"]["name"]
-                status = LIST_TO_STATUS.get(list_name)
-                if status:
-                    update_fields["status"] = status
-
-            # Description change -> parse fields
-            if "old" in data and "desc" in data["old"]:
-                new_desc = data.get("card", {}).get("desc") or ""
-                parsed = _parse_card_desc(new_desc)
-                # only carry whitelisted keys
-                for key in ("data_agendamento", "observacoes"):
-                    if key in parsed:
-                        update_fields[key] = parsed[key]
-
-        # If we have something to update, persist and stamp updated_at
-        if update_fields:
-            update_fields["updated_at"] = datetime.now(timezone.utc)
-            await db.exam_requests.update_one(
-                {"trello_card_id": card_id},
-                {"$set": update_fields}
-            )
-            logger.info("Synced Trello->DB for card %s: %s", card_id, update_fields)
-
-        return {"ok": True}
-    except Exception as e:
-        logger.error(f"Trello webhook error: {e}")
-        return JSONResponse(status_code=200, content={"ok": False})
-
-@api_router.post("/trello/sync-now")
-async def trello_sync_now(current_user: User = Depends(require_admin)):
-    """Manually poll Trello lists/cards and reconcile local DB by `trello_card_id`.
-    Admin-only to avoid accidental overload.
-    """
-    _require_trello_env()
-    updated = 0
-    try:
-        lists = await trello_service.get_lists()
-        if not lists:
-            return {"updated": 0}
-        async with httpx.AsyncClient() as client:
-            for list_name, list_id in lists.items():
-                r = await client.get(
-                    f"{TRELLO_BASE_URL}/lists/{list_id}/cards",
-                    params={"key": TRELLO_API_KEY, "token": TRELLO_TOKEN}
-                )
-                r.raise_for_status()
-                for c in r.json():
-                    card_id = c.get("id")
-                    if not card_id:
-                        continue
-                    exam = await db.exam_requests.find_one({"trello_card_id": card_id}, {"_id": 0})
-                    if not exam:
-                        continue
-
-                    update_fields = {}
-                    # list -> status
-                    status = LIST_TO_STATUS.get(list_name)
-                    if status and status != exam.get("status"):
-                        update_fields["status"] = status
-
-                    # desc -> parse fields
-                    parsed = _parse_card_desc(c.get("desc") or "")
-                    for key in ("data_agendamento", "observacoes"):
-                        if key in parsed and parsed[key] != exam.get(key):
-                            update_fields[key] = parsed[key]
-
-                    if update_fields:
-                        update_fields["updated_at"] = datetime.now(timezone.utc)
-                        await db.exam_requests.update_one(
-                            {"trello_card_id": card_id},
-                            {"$set": update_fields}
-                        )
-                        updated += 1
-        return {"updated": updated}
-    except Exception as e:
-        logger.error(f"Manual Trello sync error: {e}")
-        raise HTTPException(status_code=500, detail="Failed Trello sync")
-
 @api_router.get("/exams", response_model=List[ExamRequest])
 async def get_exam_requests(
     current_user: User = Depends(get_current_user)
@@ -1204,11 +885,8 @@ app.include_router(api_router)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ],
     allow_credentials=True,
+    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
     allow_methods=["*"],
     allow_headers=["*"],
 )
