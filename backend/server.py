@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Response, Request, Cookie
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Response, Request, Cookie, Header
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -59,6 +59,21 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Cookie configuration (allow non-secure cookie in local dev if needed)
+COOKIE_SECURE = os.environ.get('COOKIE_SECURE', 'true').lower() == 'true'
+
+# Trello configuration (already declared above), quick validator
+def _require_trello_env():
+    missing = []
+    if not os.environ.get('TRELLO_API_KEY'):
+        missing.append('TRELLO_API_KEY')
+    if not os.environ.get('TRELLO_TOKEN'):
+        missing.append('TRELLO_TOKEN')
+    if not os.environ.get('TRELLO_BOARD_ID'):
+        missing.append('TRELLO_BOARD_ID')
+    if missing:
+        raise HTTPException(status_code=500, detail=f"Trello env missing: {', '.join(missing)}")
 
 # ==================== MODELS ====================
 
@@ -374,7 +389,7 @@ email_service = EmailService()
 
 async def get_current_user(
     authorization: Optional[str] = Cookie(None, alias="session_token"),
-    auth_header: Optional[str] = None
+    auth_header: Optional[str] = Header(None, alias="Authorization")
 ) -> User:
     """Get current authenticated user from session token"""
     session_token = authorization
@@ -440,13 +455,14 @@ async def create_session(request: Request, response: Response):
         if not session_id:
             raise HTTPException(status_code=400, detail="X-Session-ID header required")
         
-        # Call Emergent Auth API
-        auth_response = requests.get(
-            "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data",
-            headers={"X-Session-ID": session_id}
-        )
-        auth_response.raise_for_status()
-        auth_data = auth_response.json()
+        # Call Emergent Auth API (async)
+        async with httpx.AsyncClient() as client:
+            auth_response = await client.get(
+                "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data",
+                headers={"X-Session-ID": session_id}
+            )
+            auth_response.raise_for_status()
+            auth_data = auth_response.json()
         
         # Check if user exists
         existing_user = await db.users.find_one({"email": auth_data['email']}, {"_id": 0})
@@ -478,12 +494,15 @@ async def create_session(request: Request, response: Response):
         await db.user_sessions.insert_one(session_dict)
         
         # Set httpOnly cookie
+        # In dev (COOKIE_SECURE=false), use SameSite=Lax to allow cookies over HTTP
+        secure = COOKIE_SECURE
+        samesite = "none" if secure else "lax"
         response.set_cookie(
             key="session_token",
             value=session_token,
             httponly=True,
-            secure=True,
-            samesite="none",
+            secure=secure,
+            samesite=samesite,
             path="/",
             max_age=7*24*60*60
         )
@@ -614,21 +633,21 @@ async def create_exam_request(
             **exam.model_dump(),
             created_by=current_user.id
         )
-        
+
         # Create Trello card
         card_name = f"Exame - {exam.nome}"
         card_desc = f"Matrícula: {exam.matricula}\nNome: {exam.nome}\nData Desligamento: {exam.data_desligamento}\nStatus: CRIADO"
-        
+
         card = await trello_service.create_card(card_name, card_desc, "Novas Solicitações DP")
-        
+
         if card:
             exam_request.trello_card_id = card['id']
             exam_request.trello_card_url = card['url']
-        
+
         # Save to database
         await db.exam_requests.insert_one(exam_request.model_dump())
-        
-        # 📧 Send email notification to RH users
+
+        # 📧 Send email notification to RH users (best-effort)
         try:
             rh_users = await db.users.find({"department": "RH"}, {"_id": 0}).to_list(100)
             if rh_users:
@@ -636,20 +655,104 @@ async def create_exam_request(
                 logger.info(f"Email notifications sent to {len(rh_users)} RH users")
         except Exception as email_error:
             logger.error(f"Error sending email notifications: {email_error}")
-            # Don't fail the request if email fails
-        
+            # Do not fail request on email errors
+
         return exam_request
-    
     except Exception as e:
         logger.error(f"Error creating exam request: {e}")
         raise HTTPException(status_code=500, detail="Failed to create exam request")
-        await db.exam_requests.insert_one(exam_request.model_dump())
-        
-        return exam_request
-    
-    except Exception as e:
-        logger.error(f"Error creating exam request: {e}")
-        raise HTTPException(status_code=500, detail="Failed to create exam request")
+
+# ==================== TRELLO READ ENDPOINTS ====================
+
+@api_router.get("/trello/lists")
+async def trello_get_lists(current_user: User = Depends(get_current_user)):
+    """Return Trello lists for the configured board."""
+    _require_trello_env()
+    api_key = os.environ.get('TRELLO_API_KEY')
+    token = os.environ.get('TRELLO_TOKEN')
+    board_id = os.environ.get('TRELLO_BOARD_ID')
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(
+                f"{TRELLO_BASE_URL}/boards/{board_id}/lists",
+                params={"key": api_key, "token": token}
+            )
+            r.raise_for_status()
+            lists = r.json()
+            # Keep only id and name for UI
+            return [{"id": lst.get("id"), "name": lst.get("name")} for lst in lists]
+    except httpx.HTTPError as e:
+        logger.error(f"Trello lists error: {e}")
+        raise HTTPException(status_code=502, detail="Failed to fetch Trello lists")
+
+@api_router.get("/trello/lists/{list_id}/cards")
+async def trello_get_list_cards(list_id: str, current_user: User = Depends(get_current_user)):
+    """Return cards for a given Trello list id."""
+    _require_trello_env()
+    api_key = os.environ.get('TRELLO_API_KEY')
+    token = os.environ.get('TRELLO_TOKEN')
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(
+                f"{TRELLO_BASE_URL}/lists/{list_id}/cards",
+                params={"key": api_key, "token": token}
+            )
+            r.raise_for_status()
+            cards = r.json()
+            # Select common fields for dashboard
+            mapped = []
+            for c in cards:
+                mapped.append({
+                    "id": c.get("id"),
+                    "name": c.get("name"),
+                    "url": c.get("url"),
+                    "desc": c.get("desc"),
+                    "due": c.get("due"),
+                    "labels": c.get("labels", []),
+                    "shortLink": c.get("shortLink"),
+                })
+            return mapped
+    except httpx.HTTPError as e:
+        logger.error(f"Trello list cards error: {e}")
+        raise HTTPException(status_code=502, detail="Failed to fetch Trello cards")
+
+@api_router.get("/trello/cards-by-list-name")
+async def trello_cards_by_list_name(name: str, current_user: User = Depends(get_current_user)):
+    """Convenience endpoint: find list by name then return its cards."""
+    _require_trello_env()
+    api_key = os.environ.get('TRELLO_API_KEY')
+    token = os.environ.get('TRELLO_TOKEN')
+    board_id = os.environ.get('TRELLO_BOARD_ID')
+    try:
+        async with httpx.AsyncClient() as client:
+            lr = await client.get(
+                f"{TRELLO_BASE_URL}/boards/{board_id}/lists",
+                params={"key": api_key, "token": token}
+            )
+            lr.raise_for_status()
+            lists = lr.json()
+            match = next((l for l in lists if l.get("name") == name), None)
+            if not match:
+                raise HTTPException(status_code=404, detail=f"Trello list '{name}' not found")
+            list_id = match.get("id")
+            cr = await client.get(
+                f"{TRELLO_BASE_URL}/lists/{list_id}/cards",
+                params={"key": api_key, "token": token}
+            )
+            cr.raise_for_status()
+            cards = cr.json()
+            return [{
+                "id": c.get("id"),
+                "name": c.get("name"),
+                "url": c.get("url"),
+                "desc": c.get("desc"),
+                "due": c.get("due"),
+                "labels": c.get("labels", []),
+                "shortLink": c.get("shortLink"),
+            } for c in cards]
+    except httpx.HTTPError as e:
+        logger.error(f"Trello cards-by-list-name error: {e}")
+        raise HTTPException(status_code=502, detail="Failed to fetch Trello cards by list name")
 
 @api_router.get("/exams", response_model=List[ExamRequest])
 async def get_exam_requests(
