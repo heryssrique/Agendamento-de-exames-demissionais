@@ -8,32 +8,55 @@ function DPDashboard({ user, onLogout }) {
   const [exams, setExams] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isImpersonating, setIsImpersonating] = useState(false);
+  const [effectiveDepartment, setEffectiveDepartment] = useState(null);
+  const [canBeAdmin, setCanBeAdmin] = useState(false);
   const [showModal, setShowModal] = useState(false);
+  const [showFinalized, setShowFinalized] = useState(false);
   const [formData, setFormData] = useState({
     matricula: "",
     nome: "",
     data_desligamento: "",
   });
+  const [formErrors, setFormErrors] = useState({ matricula: null });
+  // adiciona campo de erro para data_desligamento
+  // formErrors: { matricula: string|null, data_desligamento: string|null }
   const [trello, setTrello] = useState({ loading: true, data: [], error: null });
   const [pollingMs, setPollingMs] = useState(20000);
 
   useEffect(() => {
     fetchExams();
     checkImpersonation();
+    checkCanBeAdmin();
     fetchTrelloSnapshot();
-
     const id = setInterval(() => {
       fetchTrelloSnapshot(false);
     }, pollingMs);
     return () => clearInterval(id);
   }, []);
 
+  // Re-fetch exams when the user toggles showFinalized
+  useEffect(() => {
+    // only refetch exams (do not refetch trello snapshot)
+    setLoading(true);
+    fetchExams();
+  }, [showFinalized]);
+
   const checkImpersonation = async () => {
     try {
       const res = await axios.get(`${API}/auth/impersonation-status`);
       setIsImpersonating(!!res.data?.is_impersonating);
+      setEffectiveDepartment(res.data?.effective_department || null);
     } catch (e) {
       setIsImpersonating(false);
+    }
+  };
+
+  const checkCanBeAdmin = async () => {
+    try {
+      const res = await axios.get(`${API}/auth/can-be-admin`);
+      setCanBeAdmin(!!res.data?.can_be_admin);
+    } catch (e) {
+      setCanBeAdmin(false);
     }
   };
 
@@ -63,8 +86,10 @@ function DPDashboard({ user, onLogout }) {
 
   const fetchExams = async () => {
     try {
-      const response = await axios.get(`${API}/exams`);
-      setExams(response.data);
+      const res = await axios.get(`${API}/exams`, {
+        params: { include_finalized: showFinalized },
+      });
+      setExams(res.data);
     } catch (error) {
       console.error("Error fetching exams:", error);
     } finally {
@@ -91,17 +116,48 @@ function DPDashboard({ user, onLogout }) {
     }
   };
 
+  const validateMatricula = (value) => {
+    if (!value) return "Matrícula é obrigatória";
+    const onlyDigits = /^\d+$/;
+    if (!onlyDigits.test(value)) return "Matrícula deve conter apenas números";
+    if (value.length !== 8) return "Matrícula deve conter exatamente 8 dígitos";
+    return null;
+  };
+
+  const validateDataDesligamento = (value) => {
+    if (!value) return "Data de desligamento é obrigatória";
+    try {
+      const inputDate = new Date(value);
+      const today = new Date();
+      // zero out time to compare only date portion
+      inputDate.setHours(0,0,0,0);
+      today.setHours(0,0,0,0);
+      if (inputDate < today) return "Data de desligamento deve ser hoje ou uma data futura";
+      return null;
+    } catch (e) {
+      return "Data inválida";
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
+    const matriculaError = validateMatricula(formData.matricula);
+    const dataError = validateDataDesligamento(formData.data_desligamento);
+    setFormErrors({ ...formErrors, matricula: matriculaError });
+    setFormErrors({ ...formErrors, matricula: matriculaError, data_desligamento: dataError });
+    if (matriculaError || dataError) return;
+
     try {
       await axios.post(`${API}/exams`, formData);
       setShowModal(false);
       setFormData({ matricula: "", nome: "", data_desligamento: "" });
+      setFormErrors({ matricula: null });
       fetchExams();
       alert("✅ Solicitação criada com sucesso!");
     } catch (error) {
       console.error("Error creating exam:", error);
-      alert("❌ Erro ao criar solicitação. Tente novamente.");
+      const msg = error?.response?.data?.detail || "Erro ao criar solicitação. Tente novamente.";
+      alert(`❌ ${msg}`);
     }
   };
 
@@ -128,6 +184,48 @@ function DPDashboard({ user, onLogout }) {
     };
     return labels[status] || status;
   };
+
+  const listColorClass = (name) => {
+    if (!name) return "border-gray-300 bg-white";
+    const n = name.toLowerCase();
+    if (n.includes("nova") || n.includes("novas") || n.includes("solicita")) return "border-blue-600";
+    if (n.includes("agendado")) return "border-yellow-500";
+    if (n.includes("aguardando")) return "border-orange-500";
+    if (n.includes("inapto")) return "border-red-600";
+    if (n.includes("apto")) return "border-green-600";
+    return "border-gray-300";
+  };
+
+  const listBadgeClass = (name) => {
+    if (!name) return "bg-gray-100 text-gray-700";
+    const n = name.toLowerCase();
+    if (n.includes("nova") || n.includes("novas") || n.includes("solicita")) return "bg-blue-100 text-blue-800";
+    if (n.includes("agendado")) return "bg-yellow-100 text-yellow-800";
+    if (n.includes("aguardando")) return "bg-orange-100 text-orange-800";
+    if (n.includes("inapto")) return "bg-red-100 text-red-800";
+    if (n.includes("apto")) return "bg-green-100 text-green-800";
+    return "bg-gray-100 text-gray-700";
+  };
+
+  const parseCardStatus = (desc) => {
+    if (!desc) return null;
+    try {
+      // procura por linha 'Status: XXX' (case-insensitive)
+      const lines = desc.split(/\r?\n/);
+      for (const line of lines) {
+        const idx = line.toLowerCase().indexOf('status:');
+        if (idx !== -1) {
+          return line.slice(idx + 7).trim().toUpperCase();
+        }
+      }
+      return null;
+    } catch (e) {
+      return null;
+    }
+  };
+
+  // Note: server returns filtered list according to include_finalized
+  const visibleExams = exams;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -210,28 +308,35 @@ function DPDashboard({ user, onLogout }) {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {trello.data.map((lst) => (
-                <div key={lst.id} className="bg-white rounded-lg shadow p-4">
-                  <div className="flex items-center justify-between mb-3">
-                    <h3 className="font-semibold text-gray-900">{lst.name}</h3>
-                    <span className="text-xs text-gray-500">{(lst.cards || []).length} cards</span>
-                  </div>
+                  <div key={lst.id} className={`bg-white rounded-lg shadow p-4 border-t-4 ${listColorClass(lst.name)}`}>
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+                        {lst.name}
+                        <span className={`text-xs px-2 py-1 rounded-full ${listBadgeClass(lst.name)}`}>{(lst.cards || []).length} cards</span>
+                      </h3>
+                      <span className="text-xs text-gray-500"></span>
+                    </div>
                   {(lst.cards || []).length === 0 ? (
                     <div className="text-sm text-gray-500">Sem cards</div>
                   ) : (
                     <ul className="space-y-3 max-h-80 overflow-auto pr-1">
-                      {lst.cards.map((c) => (
-                        <li key={c.id} className="border border-gray-200 rounded-md p-3 hover:shadow-sm">
-                          <a href={c.url} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-blue-700 hover:underline">
-                            {c.name}
-                          </a>
-                          {c.desc && (
-                            <p className="text-xs text-gray-600 mt-1 whitespace-pre-line line-clamp-3">{c.desc}</p>
-                          )}
-                          {c.due && (
-                            <p className="text-xs text-gray-500 mt-1">Vencimento: {new Date(c.due).toLocaleString("pt-BR")}</p>
-                          )}
-                        </li>
-                      ))}
+                      {lst.cards.map((c) => {
+                        const status = parseCardStatus(c.desc);
+                        const isInapto = status === 'INAPTO' || (c.name || '').toLowerCase().includes('inapto');
+                        return (
+                          <li key={c.id} className={`border rounded-md p-3 hover:shadow-sm ${isInapto ? 'border-red-600 bg-red-50' : 'border-gray-200'} `}>
+                            <a href={c.url} target="_blank" rel="noopener noreferrer" className={`text-sm font-medium ${isInapto ? 'text-red-700' : 'text-blue-700'} hover:underline`}>
+                              {c.name}
+                            </a>
+                            {c.desc && (
+                              <p className="text-xs text-gray-600 mt-1 whitespace-pre-line line-clamp-3">{c.desc}</p>
+                            )}
+                            {c.due && (
+                              <p className="text-xs text-gray-500 mt-1">Vencimento: {new Date(c.due).toLocaleString("pt-BR")}</p>
+                            )}
+                          </li>
+                        );
+                      })}
                     </ul>
                   )}
                 </div>
@@ -240,27 +345,40 @@ function DPDashboard({ user, onLogout }) {
           )}
         </div>
         {/* Actions */}
-        <div className="mb-6">
-          <button
-            onClick={() => setShowModal(true)}
-            data-testid="create-exam-button"
-            className="bg-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center gap-2"
-          >
-            <svg
-              className="w-5 h-5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
+        <div className="mb-6 flex items-center justify-between">
+          <label className="flex items-center gap-2 text-sm text-gray-700">
+            <input
+              type="checkbox"
+              checked={showFinalized}
+              onChange={(e) => setShowFinalized(e.target.checked)}
+              className="w-4 h-4"
+              data-testid="toggle-show-finalized"
+            />
+            Mostrar finalizados
+          </label>
+
+          <div>
+            <button
+              onClick={() => setShowModal(true)}
+              data-testid="create-exam-button"
+              className="bg-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center gap-2"
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M12 4v16m8-8H4"
-              />
-            </svg>
-            Nova Solicitação
-          </button>
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 4v16m8-8H4"
+                />
+              </svg>
+              Nova Solicitação
+            </button>
+          </div>
         </div>
 
         {/* Exams List */}
@@ -312,7 +430,7 @@ function DPDashboard({ user, onLogout }) {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {exams.map((exam) => (
+                  {visibleExams.map((exam) => (
                     <tr key={exam.id} data-testid={`exam-row-${exam.id}`}>
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                         {exam.matricula}
@@ -352,6 +470,27 @@ function DPDashboard({ user, onLogout }) {
                         >
                           {exam.status === "FINALIZADO" ? "Finalizado" : "Finalizar"}
                         </button>
+                        {/* Excluir (apenas administradores) */}
+                        {(user?.department === "ADMIN" || effectiveDepartment === "ADMIN" || canBeAdmin) && (
+                          <button
+                            onClick={async () => {
+                              const ok = window.confirm(`Deseja excluir permanentemente o exame de ${exam.nome}? Essa ação não pode ser desfeita.`);
+                              if (!ok) return;
+                              try {
+                                await axios.delete(`${API}/exams/${exam.id}`);
+                                await fetchExams();
+                                alert('✅ Exame excluído com sucesso');
+                              } catch (err) {
+                                console.error('Error deleting exam:', err);
+                                const msg = err?.response?.data?.detail || 'Erro ao excluir exame.';
+                                alert(`❌ ${msg}`);
+                              }
+                            }}
+                            className="font-medium text-red-600 hover:text-red-900"
+                          >
+                            Excluir
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -401,11 +540,19 @@ function DPDashboard({ user, onLogout }) {
                     required
                     data-testid="input-matricula"
                     value={formData.matricula}
-                    onChange={(e) =>
-                      setFormData({ ...formData, matricula: e.target.value })
-                    }
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setFormData({ ...formData, matricula: v });
+                      const err = validateMatricula(v);
+                      setFormErrors({ ...formErrors, matricula: err });
+                    }}
+                    className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                      formErrors.matricula ? "border-red-500" : "border-gray-300"
+                    }`}
                   />
+                  {formErrors.matricula && (
+                    <p className="mt-1 text-sm text-red-600" data-testid="error-matricula">{formErrors.matricula}</p>
+                  )}
                 </div>
 
                 <div>
@@ -417,9 +564,11 @@ function DPDashboard({ user, onLogout }) {
                     required
                     data-testid="input-nome"
                     value={formData.nome}
-                    onChange={(e) =>
-                      setFormData({ ...formData, nome: e.target.value })
-                    }
+                    onChange={(e) => {
+                      // força maiúsculas enquanto digita
+                      const v = (e.target.value || "").toUpperCase();
+                      setFormData({ ...formData, nome: v });
+                    }}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
                 </div>
@@ -433,14 +582,22 @@ function DPDashboard({ user, onLogout }) {
                     required
                     data-testid="input-data-desligamento"
                     value={formData.data_desligamento}
-                    onChange={(e) =>
+                    onChange={(e) => {
+                      const v = e.target.value;
                       setFormData({
                         ...formData,
-                        data_desligamento: e.target.value,
-                      })
-                    }
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        data_desligamento: v,
+                      });
+                      const err = validateDataDesligamento(v);
+                      setFormErrors({ ...formErrors, data_desligamento: err });
+                    }}
+                    className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                      formErrors.data_desligamento ? "border-red-500" : "border-gray-300"
+                    }`}
                   />
+                  {formErrors.data_desligamento && (
+                    <p className="mt-1 text-sm text-red-600" data-testid="error-data-desligamento">{formErrors.data_desligamento}</p>
+                  )}
                 </div>
               </div>
 

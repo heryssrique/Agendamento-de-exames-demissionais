@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Response, Request, Cookie, Header
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Response, Request, Cookie, Header, Query
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -54,7 +54,7 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[],
-    allow_origin_regex=re.compile(r"^https?://(localhost|127\.0\.0\.1)(:\d+$)?"),
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+$)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -249,6 +249,88 @@ class TrelloService:
             logger.error(f"Error updating Trello card: {e}")
             return False
 
+    async def get_labels(self):
+        """Return all labels for the configured board."""
+        try:
+            url = f"{self.base_url}/boards/{self.board_id}/labels"
+            params = {"key": self.api_key, "token": self.token}
+            async with httpx.AsyncClient() as client:
+                r = await client.get(url, params=params)
+                r.raise_for_status()
+                return r.json()
+        except Exception as e:
+            logger.error(f"Error fetching labels: {e}")
+            return []
+
+    async def create_label_if_missing(self, name: str, color: str):
+        """Create a board label with given name and color if it doesn't exist. Returns label object."""
+        try:
+            labels = await self.get_labels()
+            # Match by name and color if possible
+            for l in labels:
+                if (l.get('name') or '').lower() == (name or '').lower() and (l.get('color') or '') == (color or ''):
+                    return l
+
+            url = f"{self.base_url}/labels"
+            params = {"key": self.api_key, "token": self.token, "idBoard": self.board_id, "name": name, "color": color}
+            async with httpx.AsyncClient() as client:
+                r = await client.post(url, params=params)
+                r.raise_for_status()
+                lbl = r.json()
+                logger.info(f"Created label: {lbl.get('id')} name={name} color={color}")
+                return lbl
+        except Exception as e:
+            logger.error(f"Error creating label '{name}' color '{color}': {e}")
+            return None
+
+    async def add_label_to_card(self, card_id: str, label_id: str):
+        """Add an existing label to a card (no-op if already present)."""
+        try:
+            # POST /cards/{id}/idLabels with value=labelId
+            url = f"{self.base_url}/cards/{card_id}/idLabels"
+            params = {"key": self.api_key, "token": self.token, "value": label_id}
+            async with httpx.AsyncClient() as client:
+                r = await client.post(url, params=params)
+                # Trello returns 400 if label already attached; handle gracefully
+                if r.status_code in (200, 201):
+                    return True
+                else:
+                    # if 400/409, treat as already present
+                    return r.status_code < 400
+        except Exception as e:
+            logger.error(f"Error adding label {label_id} to card {card_id}: {e}")
+            return False
+
+    async def apply_label_to_list(self, list_id: str, label_name: str, color: str):
+        """Ensure label exists and apply it to all cards in the given list id. Returns number of cards updated."""
+        try:
+            # ensure label exists
+            lbl = await self.create_label_if_missing(label_name, color)
+            if not lbl:
+                return 0
+            label_id = lbl.get('id')
+
+            # fetch cards in list
+            url = f"{self.base_url}/lists/{list_id}/cards"
+            params = {"key": self.api_key, "token": self.token}
+            async with httpx.AsyncClient() as client:
+                r = await client.get(url, params=params)
+                r.raise_for_status()
+                cards = r.json()
+
+            applied = 0
+            for c in cards:
+                card_id = c.get('id')
+                if not card_id:
+                    continue
+                ok = await self.add_label_to_card(card_id, label_id)
+                if ok:
+                    applied += 1
+            return applied
+        except Exception as e:
+            logger.error(f"Error applying label to list {list_id}: {e}")
+            return 0
+
     async def archive_card(self, card_id: str) -> bool:
         """Archive a Trello card (set closed=true)"""
         try:
@@ -283,6 +365,10 @@ class EmailService:
     def send_email_sync(self, to_email: str, subject: str, body: str):
         """Send email synchronously (called from thread pool)"""
         try:
+            # Validate SMTP configuration
+            if not self.smtp_host or not self.smtp_user or not self.smtp_password:
+                logger.error("SMTP configuration incomplete - skipping email send")
+                return False
             msg = MIMEMultipart('alternative')
             msg['From'] = f"{self.from_name} <{self.from_email}>"
             msg['To'] = to_email
@@ -376,8 +462,13 @@ class EmailService:
         
         await self.send_email(dp_user['email'], subject, body)
 
-    async def notify_dp_status_change(self, old_status: str, new_status: str, exam: dict, dp_user: dict):
+    async def notify_dp_status_change(self, old_status: Optional[str], new_status: str, exam: dict, dp_user: dict):
         """Notify DP user on any status change"""
+        subject, body = self.make_status_change_email(old_status, new_status, exam)
+        await self.send_email(dp_user['email'], subject, body)
+
+    def make_status_change_email(self, old_status: Optional[str], new_status: str, exam: dict):
+        """Gera subject e body HTML para uma mudança de status (reutilizável em testes)."""
         status_labels = {
             'CRIADO': 'Criado',
             'EM_AGENDAMENTO': 'Agendado',
@@ -386,11 +477,11 @@ class EmailService:
             'INAPTO': 'Inapto',
             'FINALIZADO': 'Finalizado',
         }
+        old_key = old_status or ''
+        new_key = new_status or ''
+        old_label = status_labels.get(old_key, old_status or '-')
+        new_label = status_labels.get(new_key, new_status or '-')
 
-        old_label = status_labels.get(old_status, old_status or '-')
-        new_label = status_labels.get(new_status, new_status or '-')
-
-        # Cores básicas por status novo
         color_map = {
             'CRIADO': ('#1E40AF', '#DBEAFE'),
             'EM_AGENDAMENTO': ('#92400E', '#FEF3C7'),
@@ -401,15 +492,15 @@ class EmailService:
         }
         color, bg = color_map.get(new_status, ('#374151', '#E5E7EB'))
 
-        subject = f"Status atualizado: {exam['nome']} — {new_label}"
+        subject = f"Status atualizado: {exam.get('nome', '')} — {new_label}"
         body = f"""
         <html>
         <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
             <div style="max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9; border-radius: 10px;">
                 <h2 style="color: #4F46E5;">🔔 Atualização de Status do Exame</h2>
                 <div style="background-color: white; padding: 20px; border-radius: 8px; margin: 20px 0;">
-                    <p><strong>Matrícula:</strong> {exam['matricula']}</p>
-                    <p><strong>Nome:</strong> {exam['nome']}</p>
+                    <p><strong>Matrícula:</strong> {exam.get('matricula')}</p>
+                    <p><strong>Nome:</strong> {exam.get('nome')}</p>
                     <p><strong>Data de Desligamento:</strong> {exam.get('data_desligamento', '-')}</p>
                     <p style="margin-top: 16px;"><strong>Status:</strong>
                         <span style="background-color: {bg}; color: {color}; padding: 6px 12px; border-radius: 12px; font-weight: 600;">
@@ -428,7 +519,7 @@ class EmailService:
         </body>
         </html>
         """
-        await self.send_email(dp_user['email'], subject, body)
+        return subject, body
     
     async def notify_dp_exam_result(self, exam: dict, dp_user: dict):
         """Notify DP user about exam result"""
@@ -531,7 +622,14 @@ def require_department(required_dept: str):
 
 async def require_admin(current_user: User = Depends(get_current_user)):
     """Dependency to require admin access"""
-    if current_user.department != "ADMIN":
+    # Allow access if the user's stored department is ADMIN
+    # or if their email is configured in ADMIN_EMAILS (admin list from env)
+    try:
+        user_email = (current_user.email or "").lower()
+    except Exception:
+        user_email = ""
+
+    if current_user.department != "ADMIN" and user_email not in ADMIN_EMAILS:
         raise HTTPException(
             status_code=403,
             detail="Access denied. Admin privileges required"
@@ -650,8 +748,18 @@ async def dev_login(payload: DevLoginRequest, response: Response):
         # create session
         session_token = str(uuid.uuid4())
         expires_at = datetime.now(timezone.utc) + timedelta(days=7)
+        # ensure we have a user id (user may be dict from DB or model_dump())
+        user_id = None
+        if isinstance(user, dict):
+            user_id = user.get("id")
+        else:
+            user_id = getattr(user, "id", None)
+        if not user_id:
+            logger.error("dev_login: cannot determine user id for session creation")
+            raise HTTPException(status_code=500, detail="Failed to create session (user id missing)")
+
         session = UserSession(
-            user_id=user["id"],
+            user_id=user_id,
             session_token=session_token,
             expires_at=expires_at
         ).model_dump()
@@ -895,6 +1003,93 @@ async def admin_purge_exams(admin_user: User = Depends(require_admin)):
         logger.error(f"Error purging exam requests: {e}")
         raise HTTPException(status_code=500, detail="Failed to purge exam requests")
 
+
+class TestNotificationRequest(BaseModel):
+    exam_id: Optional[str] = None
+    dry_run: bool = True
+    override_recipient: Optional[str] = None  # if provided, send only to this email
+
+
+@api_router.post("/admin/test-notifications")
+async def admin_test_notifications(
+    payload: TestNotificationRequest,
+    admin_user: User = Depends(require_admin)
+):
+    """Endpoint admin: testa envio de notificações para todos os status.
+
+    - Se `exam_id` fornecido, usa esse exame; caso contrário cria um exame fake (em memória).
+    - `dry_run` por padrão true; se false enviará emails reais para destinatários encontrados.
+    - `override_recipient` envia apenas para o email especificado (útil para testes).
+    """
+    try:
+        statuses = ["CRIADO", "EM_AGENDAMENTO", "AGUARDANDO_RESULTADO", "APTO", "INAPTO"]
+
+        # Fetch exam or build fake
+        if payload.exam_id:
+            exam = await db.exam_requests.find_one({"id": payload.exam_id}, {"_id": 0})
+            if not exam:
+                raise HTTPException(status_code=404, detail="Exam not found")
+        else:
+            # Fake exam for preview
+            exam = {
+                "id": "test-exam-000",
+                "matricula": "000000",
+                "nome": "Usuário Teste",
+                "data_desligamento": datetime.now(timezone.utc).date().isoformat(),
+                "status": "CRIADO",
+                "data_agendamento": None,
+                "observacoes": "Teste de notificação",
+            }
+
+        results = []
+        for st in statuses:
+            # Build recipients according to same rules used in update endpoint
+            recipients = []
+            if st in ["EM_AGENDAMENTO", "AGUARDANDO_RESULTADO"]:
+                recipients += await db.users.find({"department": "DP"}, {"_id": 0}).to_list(2000)
+                recipients += await db.users.find({"department": "RH"}, {"_id": 0}).to_list(2000)
+            elif st in ["APTO", "INAPTO"]:
+                recipients += await db.users.find({"department": "DP"}, {"_id": 0}).to_list(2000)
+                recipients += await db.users.find({"department": "RH"}, {"_id": 0}).to_list(2000)
+                recipients += await db.users.find({"department": "ADMIN"}, {"_id": 0}).to_list(2000)
+            else:
+                recipients += await db.users.find({"department": "DP"}, {"_id": 0}).to_list(2000)
+                recipients += await db.users.find({"department": "RH"}, {"_id": 0}).to_list(2000)
+
+            # Apply override_recipient if provided
+            if payload.override_recipient:
+                recipients = [{"email": payload.override_recipient, "name": "Override Recipient"}]
+
+            # Deduplicate
+            seen = set()
+            unique = []
+            for u in recipients:
+                email = (u.get("email") or "").lower()
+                if email and email not in seen:
+                    seen.add(email)
+                    unique.append(u)
+
+            sent = 0
+            previews = []
+            for user_rec in unique:
+                try:
+                    subject, body = email_service.make_status_change_email(None, st, exam)
+                    previews.append({"to": user_rec.get("email"), "subject": subject})
+                    if not payload.dry_run:
+                        await email_service.send_email(user_rec.get("email"), subject, body)
+                        sent += 1
+                except Exception as e:
+                    logger.error(f"Test notify failed for {user_rec.get('email')}: {e}")
+
+            results.append({"status": st, "recipients_count": len(unique), "sent": sent, "previews": previews[:10]})
+
+        return {"ok": True, "dry_run": payload.dry_run, "results": results}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"admin_test_notifications error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to run test notifications")
+
 # ==================== EXAM ROUTES ====================
 
 @api_router.post("/exams", response_model=ExamRequest)
@@ -904,9 +1099,30 @@ async def create_exam_request(
 ):
     """Create new exam request (DP only)"""
     try:
+        # Validação: matrícula deve conter exatamente 8 dígitos numéricos
+        matricula_raw = (exam.matricula or "").strip()
+        if not re.fullmatch(r"\d{8}", matricula_raw):
+            raise HTTPException(status_code=400, detail="Matrícula deve conter exatamente 8 dígitos numéricos")
+        # Normalize matricula e nome no payload
+        exam_payload = exam.model_dump()
+        exam_payload['matricula'] = matricula_raw
+        # Forçar nome em maiúsculas
+        exam_payload['nome'] = (exam_payload.get('nome') or '').upper()
+        # Validação: data_desligamento deve ser hoje ou data futura (compara apenas a parte de data)
+        try:
+            ds = exam_payload.get('data_desligamento')
+            if not ds:
+                raise HTTPException(status_code=400, detail="Data de desligamento é obrigatória")
+            # assume formato YYYY-MM-DD
+            ds_date = datetime.fromisoformat(ds).date()
+            today_date = datetime.now(timezone.utc).date()
+            if ds_date < today_date:
+                raise HTTPException(status_code=400, detail="Data de desligamento deve ser hoje ou uma data futura")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Data de desligamento com formato inválido (esperado YYYY-MM-DD)")
         # Create exam request
         exam_request = ExamRequest(
-            **exam.model_dump(),
+            **exam_payload,
             created_by=current_user.id
         )
 
@@ -944,20 +1160,21 @@ async def create_exam_request(
 
         # 📧 Notificações ao criar (status CRIADO): DP e RH
         try:
-            # RH
-            rh_users = await db.users.find({"department": "RH"}, {"_id": 0}).to_list(1000)
-            if rh_users:
-                await email_service.notify_rh_new_request(exam_request.model_dump(), rh_users)
-                logger.info(f"Email notifications sent to {len(rh_users)} RH users")
-            # DP (todos)
-            dp_users = await db.users.find({"department": "DP"}, {"_id": 0}).to_list(2000)
-            for dp_user in dp_users:
-                try:
-                    await email_service.notify_dp_status_change(None, "CRIADO", exam_request.model_dump(), dp_user)
-                except Exception as e:
-                    logger.error(f"Failed to notify DP user {dp_user.get('email')}: {e}")
-            if dp_users:
-                logger.info(f"Email notifications sent to {len(dp_users)} DP users (CRIADO)")
+            # Notificar apenas o criador do exame (current_user)
+            creator = current_user.model_dump()
+            try:
+                await email_service.notify_dp_status_change(None, "CRIADO", exam_request.model_dump(), creator)
+                logger.info(f"Email notification (CRIADO) sent to creator: {creator.get('email')}")
+            except Exception as e:
+                logger.error(f"Failed to notify creator {creator.get('email')}: {e}")
+            # Notificar usuários do RH sobre nova solicitação
+            try:
+                rh_users = await db.users.find({"department": "RH"}, {"_id": 0}).to_list(2000)
+                if rh_users:
+                    await email_service.notify_rh_new_request(exam_request.model_dump(), rh_users)
+                    logger.info(f"Email notification (CRIADO) sent to RH: {len(rh_users)} users")
+            except Exception as rh_err:
+                logger.error(f"Failed to notify RH users: {rh_err}")
         except Exception as email_error:
             logger.error(f"Error sending email notifications: {email_error}")
             # Do not fail request on email errors
@@ -984,80 +1201,13 @@ async def trello_get_lists(current_user: User = Depends(get_current_user)):
             )
             r.raise_for_status()
             lists = r.json()
-            # Keep only id and name for UI
-            return [{"id": lst.get("id"), "name": lst.get("name")} for lst in lists]
+            return [{
+                "id": l.get("id"),
+                "name": l.get("name"),
+            } for l in lists]
     except httpx.HTTPError as e:
         logger.error(f"Trello lists error: {e}")
         raise HTTPException(status_code=502, detail="Failed to fetch Trello lists")
-
-@api_router.get("/trello/lists/{list_id}/cards")
-async def trello_get_list_cards(list_id: str, current_user: User = Depends(get_current_user)):
-    """Return cards for a given Trello list id."""
-    _require_trello_env()
-    api_key = os.environ.get('TRELLO_API_KEY')
-    token = os.environ.get('TRELLO_TOKEN')
-    try:
-        async with httpx.AsyncClient() as client:
-            r = await client.get(
-                f"{TRELLO_BASE_URL}/lists/{list_id}/cards",
-                params={"key": api_key, "token": token}
-            )
-            r.raise_for_status()
-            cards = r.json()
-            # Select common fields for dashboard
-            mapped = []
-            for c in cards:
-                mapped.append({
-                    "id": c.get("id"),
-                    "name": c.get("name"),
-                    "url": c.get("url"),
-                    "desc": c.get("desc"),
-                    "due": c.get("due"),
-                    "labels": c.get("labels", []),
-                    "shortLink": c.get("shortLink"),
-                })
-            return mapped
-    except httpx.HTTPError as e:
-        logger.error(f"Trello list cards error: {e}")
-        raise HTTPException(status_code=502, detail="Failed to fetch Trello cards")
-
-@api_router.get("/trello/cards-by-list-name")
-async def trello_cards_by_list_name(name: str, current_user: User = Depends(get_current_user)):
-    """Convenience endpoint: find list by name then return its cards."""
-    _require_trello_env()
-    api_key = os.environ.get('TRELLO_API_KEY')
-    token = os.environ.get('TRELLO_TOKEN')
-    board_id = os.environ.get('TRELLO_BOARD_ID')
-    try:
-        async with httpx.AsyncClient() as client:
-            lr = await client.get(
-                f"{TRELLO_BASE_URL}/boards/{board_id}/lists",
-                params={"key": api_key, "token": token}
-            )
-            lr.raise_for_status()
-            lists = lr.json()
-            match = next((l for l in lists if l.get("name") == name), None)
-            if not match:
-                raise HTTPException(status_code=404, detail=f"Trello list '{name}' not found")
-            list_id = match.get("id")
-            cr = await client.get(
-                f"{TRELLO_BASE_URL}/lists/{list_id}/cards",
-                params={"key": api_key, "token": token}
-            )
-            cr.raise_for_status()
-            cards = cr.json()
-            return [{
-                "id": c.get("id"),
-                "name": c.get("name"),
-                "url": c.get("url"),
-                "desc": c.get("desc"),
-                "due": c.get("due"),
-                "labels": c.get("labels", []),
-                "shortLink": c.get("shortLink"),
-            } for c in cards]
-    except httpx.HTTPError as e:
-        logger.error(f"Trello cards-by-list-name error: {e}")
-        raise HTTPException(status_code=502, detail="Failed to fetch Trello cards by list name")
 
 @api_router.get("/trello/board-snapshot")
 async def trello_board_snapshot(current_user: User = Depends(get_current_user)):
@@ -1281,13 +1431,59 @@ async def trello_sync_now(current_user: User = Depends(require_admin)):
         logger.error(f"Manual Trello sync error: {e}")
         raise HTTPException(status_code=500, detail="Failed Trello sync")
 
+
+@api_router.post("/trello/sync-list-colors")
+async def trello_sync_list_colors(admin_user: User = Depends(require_admin)):
+    """Admin: cria/aplica labels coloridos para listas no board conforme regras do dashboard."""
+    try:
+        _require_trello_env()
+        lists = await trello_service.get_lists()
+        if not lists:
+            return {"updated": 0, "message": "No lists found"}
+
+        # mapping name -> (labelName, color)
+        def mapping(name: str):
+            n = (name or '').lower()
+            if 'nova' in n or 'solicita' in n:
+                return ("Novas Solicitações", "blue")
+            if 'agendado' in n:
+                return ("Agendado", "yellow")
+            if 'aguardando' in n:
+                return ("Aguardando Resultado", "orange")
+            if 'inapto' in n:
+                return ("Inapto", "red")
+            if 'apto' in n:
+                return ("Apto", "green")
+            return (None, None)
+
+        updated = 0
+        # lists is a dict name->id
+        for name, list_id in lists.items():
+            lbl_name, color = mapping(name)
+            if not lbl_name or not color:
+                continue
+            applied = await trello_service.apply_label_to_list(list_id, lbl_name, color)
+            updated += applied
+
+        return {"ok": True, "applied_labels_to_cards": updated}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error syncing list colors: {e}")
+        raise HTTPException(status_code=500, detail="Failed to sync list colors")
+
 @api_router.get("/exams", response_model=List[ExamRequest])
 async def get_exam_requests(
+    include_finalized: Optional[bool] = Query(True, description="Include exams with status FINALIZADO"),
     current_user: User = Depends(get_current_user)
 ):
     """Get all exam requests"""
     try:
-        exams = await db.exam_requests.find({}, {"_id": 0}).to_list(1000)
+        # If include_finalized is False, filter out exams with status FINALIZADO at the DB level
+        query = {}
+        if include_finalized is False:
+            query = {"status": {"$ne": "FINALIZADO"}}
+        exams = await db.exam_requests.find(query, {"_id": 0}).to_list(1000)
         return exams
     
     except Exception as e:
@@ -1342,6 +1538,8 @@ async def update_exam_request(
         
         # Get updated exam for notifications
         updated_exam = await db.exam_requests.find_one({"id": exam_id}, {"_id": 0})
+        if not updated_exam:
+            updated_exam = exam
         
         # Update Trello card if status changed
         if update.status and exam.get('trello_card_id'):
@@ -1395,8 +1593,8 @@ async def update_exam_request(
                 if update.status in ["EM_AGENDAMENTO", "AGUARDANDO_RESULTADO"]:
                     recipients += await db.users.find({"department": "DP"}, {"_id": 0}).to_list(2000)
                     recipients += await db.users.find({"department": "RH"}, {"_id": 0}).to_list(2000)
-                # Para APTO/INAPTO/FINALIZADO -> DP, RH e ADMIN
-                elif update.status in ["APTO", "INAPTO", "FINALIZADO"]:
+                # Para APTO/INAPTO -> DP, RH e ADMIN (FINALIZADO não notifica)
+                elif update.status in ["APTO", "INAPTO"]:
                     recipients += await db.users.find({"department": "DP"}, {"_id": 0}).to_list(2000)
                     recipients += await db.users.find({"department": "RH"}, {"_id": 0}).to_list(2000)
                     recipients += await db.users.find({"department": "ADMIN"}, {"_id": 0}).to_list(2000)
@@ -1417,6 +1615,9 @@ async def update_exam_request(
                 sent = 0
                 for user_rec in unique_recipients:
                     try:
+                        # Skip sending when new status is FINALIZADO
+                        if update.status == "FINALIZADO":
+                            continue
                         await email_service.notify_dp_status_change(old_status, update.status, updated_exam, user_rec)
                         sent += 1
                     except Exception as e:
@@ -1434,6 +1635,61 @@ async def update_exam_request(
     except Exception as e:
         logger.error(f"Error updating exam request: {e}")
         raise HTTPException(status_code=500, detail="Failed to update exam request")
+
+
+@api_router.delete("/exams/{exam_id}")
+async def delete_exam_request(
+    exam_id: str,
+    admin_user: User = Depends(require_admin)
+):
+    """Delete an exam request (Admin only).
+
+    - Archives the Trello card if linked.
+    - Inserts a history event of type DELETED.
+    - Removes the exam document from the database.
+    """
+    try:
+        exam = await db.exam_requests.find_one({"id": exam_id}, {"_id": 0})
+        if not exam:
+            raise HTTPException(status_code=404, detail="Exam request not found")
+
+        # Archive Trello card when present (best-effort)
+        trello_id = exam.get("trello_card_id")
+        if trello_id:
+            try:
+                await trello_service.archive_card(trello_id)
+            except Exception as e:
+                logger.warning(f"Failed to archive Trello card {trello_id} for exam {exam_id}: {e}")
+
+        # Log deletion in history
+        try:
+            await db.exam_history.insert_one({
+                "id": str(uuid.uuid4()),
+                "exam_id": exam_id,
+                "event": "DELETED",
+                "timestamp": datetime.now(timezone.utc),
+                "actor_id": admin_user.id,
+                "actor_email": admin_user.email,
+                "actor_department": admin_user.department,
+                "payload": {
+                    "matricula": exam.get("matricula"),
+                    "nome": exam.get("nome"),
+                    "status": exam.get("status"),
+                },
+            })
+        except Exception as e:
+            logger.error(f"Failed to log exam deletion history for {exam_id}: {e}")
+
+        # Delete exam document
+        result = await db.exam_requests.delete_one({"id": exam_id})
+        logger.info(f"Admin {admin_user.email} deleted exam {exam_id} (deleted_count={getattr(result, 'deleted_count', None)})")
+
+        return {"message": "Exam request deleted successfully", "exam_id": exam_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting exam request: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete exam request")
 
 # ==================== ADMIN HISTORY ROUTES ====================
 

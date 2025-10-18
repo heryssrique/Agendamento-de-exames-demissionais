@@ -17,6 +17,7 @@ function RHDashboard({ user, onLogout }) {
   });
   const [trello, setTrello] = useState({ loading: true, data: [], error: null });
   const [pollingMs, setPollingMs] = useState(20000);
+  const [showFinalized, setShowFinalized] = useState(false);
 
   useEffect(() => {
     fetchExams();
@@ -28,6 +29,12 @@ function RHDashboard({ user, onLogout }) {
     }, pollingMs);
     return () => clearInterval(id);
   }, []);
+
+  // Re-fetch exams when the user toggles showFinalized
+  useEffect(() => {
+    setLoading(true);
+    fetchExams();
+  }, [showFinalized]);
 
   const checkImpersonation = async () => {
     try {
@@ -49,8 +56,10 @@ function RHDashboard({ user, onLogout }) {
 
   const fetchExams = async () => {
     try {
-      const response = await axios.get(`${API}/exams`);
-      setExams(response.data);
+      const res = await axios.get(`${API}/exams`, {
+        params: { include_finalized: showFinalized },
+      });
+      setExams(res.data);
     } catch (error) {
       console.error("Error fetching exams:", error);
     } finally {
@@ -123,6 +132,47 @@ function RHDashboard({ user, onLogout }) {
     };
     return labels[status] || status;
   };
+
+  const listColorClass = (name) => {
+    if (!name) return "border-gray-300 bg-white";
+    const n = name.toLowerCase();
+    if (n.includes("nova") || n.includes("novas") || n.includes("solicita")) return "border-blue-600";
+    if (n.includes("agendado")) return "border-yellow-500";
+    if (n.includes("aguardando")) return "border-orange-500";
+    if (n.includes("inapto")) return "border-red-600";
+    if (n.includes("apto")) return "border-green-600";
+    return "border-gray-300";
+  };
+
+  const listBadgeClass = (name) => {
+    if (!name) return "bg-gray-100 text-gray-700";
+    const n = name.toLowerCase();
+    if (n.includes("nova") || n.includes("novas") || n.includes("solicita")) return "bg-blue-100 text-blue-800";
+    if (n.includes("agendado")) return "bg-yellow-100 text-yellow-800";
+    if (n.includes("aguardando")) return "bg-orange-100 text-orange-800";
+    if (n.includes("inapto")) return "bg-red-100 text-red-800";
+    if (n.includes("apto")) return "bg-green-100 text-green-800";
+    return "bg-gray-100 text-gray-700";
+  };
+
+  const parseCardStatus = (desc) => {
+    if (!desc) return null;
+    try {
+      const lines = desc.split(/\r?\n/);
+      for (const line of lines) {
+        const idx = line.toLowerCase().indexOf('status:');
+        if (idx !== -1) {
+          return line.slice(idx + 7).trim().toUpperCase();
+        }
+      }
+      return null;
+    } catch (e) {
+      return null;
+    }
+  };
+
+  // Note: server returns filtered list according to include_finalized
+  const visibleExams = exams;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -205,28 +255,35 @@ function RHDashboard({ user, onLogout }) {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {trello.data.map((lst) => (
-                <div key={lst.id} className="bg-white rounded-lg shadow p-4">
+                <div key={lst.id} className={`bg-white rounded-lg shadow p-4 border-t-4 ${listColorClass(lst.name)}`}>
                   <div className="flex items-center justify-between mb-3">
-                    <h3 className="font-semibold text-gray-900">{lst.name}</h3>
-                    <span className="text-xs text-gray-500">{(lst.cards || []).length} cards</span>
+                    <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+                      {lst.name}
+                      <span className={`text-xs px-2 py-1 rounded-full ${listBadgeClass(lst.name)}`}>{(lst.cards || []).length} cards</span>
+                    </h3>
+                    <span className="text-xs text-gray-500"></span>
                   </div>
                   {(lst.cards || []).length === 0 ? (
                     <div className="text-sm text-gray-500">Sem cards</div>
                   ) : (
                     <ul className="space-y-3 max-h-80 overflow-auto pr-1">
-                      {lst.cards.map((c) => (
-                        <li key={c.id} className="border border-gray-200 rounded-md p-3 hover:shadow-sm">
-                          <a href={c.url} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-indigo-700 hover:underline">
-                            {c.name}
-                          </a>
-                          {c.desc && (
-                            <p className="text-xs text-gray-600 mt-1 whitespace-pre-line line-clamp-3">{c.desc}</p>
-                          )}
-                          {c.due && (
-                            <p className="text-xs text-gray-500 mt-1">Vencimento: {new Date(c.due).toLocaleString("pt-BR")}</p>
-                          )}
-                        </li>
-                      ))}
+                      {lst.cards.map((c) => {
+                        const status = parseCardStatus(c.desc);
+                        const isInapto = status === 'INAPTO' || (c.name || '').toLowerCase().includes('inapto');
+                        return (
+                          <li key={c.id} className={`border rounded-md p-3 hover:shadow-sm ${isInapto ? 'border-red-600 bg-red-50' : 'border-gray-200'} `}>
+                            <a href={c.url} target="_blank" rel="noopener noreferrer" className={`text-sm font-medium ${isInapto ? 'text-red-700' : 'text-indigo-700'} hover:underline`}>
+                              {c.name}
+                            </a>
+                            {c.desc && (
+                              <p className="text-xs text-gray-600 mt-1 whitespace-pre-line line-clamp-3">{c.desc}</p>
+                            )}
+                            {c.due && (
+                              <p className="text-xs text-gray-500 mt-1">Vencimento: {new Date(c.due).toLocaleString("pt-BR")}</p>
+                            )}
+                          </li>
+                        );
+                      })}
                     </ul>
                   )}
                 </div>
@@ -234,11 +291,21 @@ function RHDashboard({ user, onLogout }) {
             </div>
           )}
         </div>
-        <div className="mb-6">
-          <h2 className="text-2xl font-bold text-gray-900">Exames Demissionais</h2>
-          <p className="text-gray-600 mt-1">
-            Gerencie agendamentos e resultados de exames
-          </p>
+        <div className="mb-6 flex items-center justify-between">
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900">Exames Demissionais</h2>
+            <p className="text-gray-600 mt-1">Gerencie agendamentos e resultados de exames</p>
+          </div>
+          <label className="flex items-center gap-2 text-sm text-gray-700">
+            <input
+              type="checkbox"
+              checked={showFinalized}
+              onChange={(e) => setShowFinalized(e.target.checked)}
+              className="w-4 h-4"
+              data-testid="toggle-show-finalized"
+            />
+            Mostrar finalizados
+          </label>
         </div>
 
         {/* Exams List */}
@@ -290,7 +357,7 @@ function RHDashboard({ user, onLogout }) {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {exams.map((exam) => (
+                  {visibleExams.map((exam) => (
                     <tr key={exam.id} data-testid={`exam-row-${exam.id}`}>
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                         {exam.matricula}
