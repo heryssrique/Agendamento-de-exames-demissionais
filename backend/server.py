@@ -855,6 +855,35 @@ async def update_user_department(
         logger.error(f"Error updating user department: {e}")
         raise HTTPException(status_code=500, detail="Failed to update user department")
 
+@api_router.delete("/admin/users/{user_id}")
+async def delete_user(
+    user_id: str,
+    admin_user: User = Depends(require_admin)
+):
+    """Delete a user and their sessions (Admin only). Prevent self-deletion."""
+    try:
+        # Check if user exists
+        user = await db.users.find_one({"id": user_id}, {"_id": 0})
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # Prevent admin from deleting themselves
+        if user_id == admin_user.id:
+            raise HTTPException(status_code=400, detail="You cannot delete your own user")
+
+        # Delete user sessions
+        await db.user_sessions.delete_many({"user_id": user_id})
+        # Delete user document
+        await db.users.delete_one({"id": user_id})
+
+        logger.info(f"Admin {admin_user.email} deleted user {user.get('email')}")
+        return {"message": "User deleted successfully", "user_id": user_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting user: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete user")
+
 @api_router.post("/admin/purge-exams")
 async def admin_purge_exams(admin_user: User = Depends(require_admin)):
     """Delete ALL exam requests from the database. Admin only."""

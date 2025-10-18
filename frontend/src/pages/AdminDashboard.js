@@ -97,6 +97,25 @@ function AdminDashboard({ user, onLogout }) {
     }
   };
 
+  const deleteUser = async (userId, userEmail) => {
+    if (user && user.id === userId) {
+      alert("❌ Você não pode excluir seu próprio usuário.");
+      return;
+    }
+    if (!window.confirm(`Tem certeza que deseja excluir o usuário ${userEmail}? Esta ação é irreversível.`)) {
+      return;
+    }
+    try {
+      await axios.delete(`${API}/admin/users/${userId}`);
+      alert("✅ Usuário excluído com sucesso!");
+      fetchUsers();
+    } catch (error) {
+      console.error("Error deleting user:", error);
+      const msg = error.response?.data?.detail || "Erro ao excluir usuário.";
+      alert(`❌ ${msg}`);
+    }
+  };
+
   const getDepartmentBadge = (dept) => {
     const badges = {
       DP: "bg-blue-100 text-blue-800",
@@ -414,6 +433,15 @@ function AdminDashboard({ user, onLogout }) {
                             → Admin
                           </button>
                         )}
+                        <button
+                          onClick={() => deleteUser(u.id, u.email)}
+                          className={`font-medium ml-2 ${user && user.id === u.id ? 'text-gray-400 cursor-not-allowed' : 'text-red-600 hover:text-red-900'}`}
+                          title={user && user.id === u.id ? 'Você não pode excluir seu próprio usuário' : 'Excluir usuário'}
+                          disabled={user && user.id === u.id}
+                          data-testid={`delete-user-${u.id}`}
+                        >
+                          Excluir
+                        </button>
                       </td>
                     </tr>
                   ))}
