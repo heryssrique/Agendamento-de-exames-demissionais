@@ -7,9 +7,15 @@ const API = `${BACKEND_URL}/api`;
 function AdminDashboard({ user, onLogout }) {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [adminEmails, setAdminEmails] = useState([]);
+  const [loadingAdmins, setLoadingAdmins] = useState(false);
+  const [history, setHistory] = useState({ items: [], loading: false, error: null });
+  const [historyFilters, setHistoryFilters] = useState({ exam_id: "", actor_email: "", limit: 200 });
 
   useEffect(() => {
     fetchUsers();
+    fetchAdminEmails();
+    fetchHistory();
   }, []);
 
   const fetchUsers = async () => {
@@ -21,6 +27,47 @@ function AdminDashboard({ user, onLogout }) {
       alert("Erro ao carregar usuários. Verifique suas permissões.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchHistory = async () => {
+    try {
+      setHistory((prev) => ({ ...prev, loading: true, error: null }));
+      const params = new URLSearchParams();
+      if (historyFilters.exam_id) params.append("exam_id", historyFilters.exam_id);
+      if (historyFilters.actor_email) params.append("actor_email", historyFilters.actor_email);
+      if (historyFilters.limit) params.append("limit", historyFilters.limit);
+      const res = await axios.get(`${API}/admin/history?${params.toString()}`);
+      setHistory({ items: res.data || [], loading: false, error: null });
+    } catch (error) {
+      console.error("Error fetching history:", error);
+      setHistory({ items: [], loading: false, error: "Falha ao carregar histórico" });
+    }
+  };
+
+  const fetchAdminEmails = async () => {
+    try {
+      setLoadingAdmins(true);
+      const res = await axios.get(`${API}/auth/admin-emails`);
+      setAdminEmails(res.data.admin_emails || []);
+    } catch (error) {
+      console.error("Error fetching admin emails:", error);
+      setAdminEmails([]);
+      if (error.response?.status === 403) {
+        alert("❌ Permissão negada para listar e-mails de administradores.");
+      }
+    } finally {
+      setLoadingAdmins(false);
+    }
+  };
+
+  const impersonate = async (dept) => {
+    try {
+      await axios.post(`${API}/auth/impersonate-department`, { department: dept });
+      window.location.href = "/";
+    } catch (error) {
+      console.error("Error starting impersonation:", error);
+      alert("❌ Não foi possível entrar como setor. Tente novamente.");
     }
   };
 
@@ -103,19 +150,160 @@ function AdminDashboard({ user, onLogout }) {
                 <p className="text-sm text-gray-600">{user.name}</p>
               </div>
             </div>
-            <button
-              onClick={handleLogout}
-              data-testid="logout-button"
-              className="text-gray-600 hover:text-gray-900 font-medium"
-            >
-              Sair
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => impersonate("DP")}
+                className="text-blue-600 hover:text-blue-900 font-medium"
+                data-testid="impersonate-dp"
+              >
+                Entrar como DP
+              </button>
+              <button
+                onClick={() => impersonate("RH")}
+                className="text-indigo-600 hover:text-indigo-900 font-medium"
+                data-testid="impersonate-rh"
+              >
+                Entrar como RH
+              </button>
+              <button
+                onClick={handleLogout}
+                data-testid="logout-button"
+                className="text-gray-600 hover:text-gray-900 font-medium"
+              >
+                Sair
+              </button>
+            </div>
           </div>
         </div>
       </div>
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* History */}
+        <div className="mb-6 bg-white rounded-lg shadow p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">Histórico de Eventos</h2>
+              <p className="text-gray-600 text-sm">Criações e alterações de exames</p>
+            </div>
+            <button onClick={fetchHistory} className="text-purple-600 hover:text-purple-900 font-medium" data-testid="refresh-history">
+              Atualizar
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+            <input
+              type="text"
+              placeholder="Filtrar por Exam ID"
+              value={historyFilters.exam_id}
+              onChange={(e) => setHistoryFilters({ ...historyFilters, exam_id: e.target.value })}
+              className="px-3 py-2 border border-gray-300 rounded-lg"
+            />
+            <input
+              type="email"
+              placeholder="Filtrar por e-mail do autor"
+              value={historyFilters.actor_email}
+              onChange={(e) => setHistoryFilters({ ...historyFilters, actor_email: e.target.value })}
+              className="px-3 py-2 border border-gray-300 rounded-lg"
+            />
+            <select
+              value={historyFilters.limit}
+              onChange={(e) => setHistoryFilters({ ...historyFilters, limit: Number(e.target.value) })}
+              className="px-3 py-2 border border-gray-300 rounded-lg"
+            >
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+              <option value={200}>200</option>
+              <option value={500}>500</option>
+            </select>
+          </div>
+
+          <div className="mb-4">
+            <button onClick={fetchHistory} className="px-4 py-2 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700" data-testid="apply-filters">
+              Aplicar filtros
+            </button>
+          </div>
+
+          {history.loading ? (
+            <div className="text-gray-600">Carregando...</div>
+          ) : history.error ? (
+            <div className="bg-red-50 text-red-700 px-4 py-3 rounded-lg">{history.error}</div>
+          ) : history.items.length === 0 ? (
+            <div className="text-gray-600">Nenhum evento encontrado.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Data</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Evento</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Exam ID</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Autor</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Setor</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Detalhes</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200" data-testid="history-table-body">
+                  {history.items.map((h) => (
+                    <tr key={h.id}>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{new Date(h.timestamp).toLocaleString("pt-BR")}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{h.event}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{h.exam_id}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{h.actor_email}</td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className="px-2 py-1 text-xs rounded-full bg-purple-100 text-purple-800">{h.actor_department || "-"}</span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-pre-wrap text-xs text-gray-600">
+                        {h.event === 'UPDATED' ? (
+                          <div>
+                            <div><strong>Status:</strong> {h.old_status} → {h.new_status}</div>
+                            {h.payload && (
+                              <pre className="mt-1 bg-gray-50 p-2 rounded border border-gray-200">{JSON.stringify(h.payload, null, 2)}</pre>
+                            )}
+                          </div>
+                        ) : (
+                          <div>
+                            {h.payload && (
+                              <pre className="mt-1 bg-gray-50 p-2 rounded border border-gray-200">{JSON.stringify(h.payload, null, 2)}</pre>
+                            )}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+        {/* Admin Emails */}
+        <div className="mb-6 bg-white rounded-lg shadow p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">E-mails de Administradores (CONFIG)</h2>
+              <p className="text-gray-600 text-sm">Lista proveniente de ADMIN_EMAILS (arquivo .env)</p>
+            </div>
+            <button
+              onClick={fetchAdminEmails}
+              className="text-purple-600 hover:text-purple-900 font-medium"
+              data-testid="refresh-admin-emails"
+            >
+              Atualizar
+            </button>
+          </div>
+          {loadingAdmins ? (
+            <div className="text-gray-600">Carregando...</div>
+          ) : adminEmails.length === 0 ? (
+            <div className="text-gray-600">Nenhum e-mail configurado.</div>
+          ) : (
+            <ul className="list-disc pl-6 space-y-1" data-testid="admin-email-list">
+              {adminEmails.map((e) => (
+                <li key={e} className="text-gray-800">{e}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+
         <div className="mb-6">
           <h2 className="text-2xl font-bold text-gray-900">
             Gerenciamento de Usuários

@@ -1,0 +1,7 @@
+#iniciar testes
+
+backend: python -m uvicorn --host 0.0.0.0 --port 8000 --reload --reload-dir backend backend.server:app
+
+frontend: Invoke-Expression "yarn --cwd frontend start"
+
+ngrok: ngrok http http://localhost:8000

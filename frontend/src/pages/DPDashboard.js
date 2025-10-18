@@ -7,16 +7,59 @@ const API = `${BACKEND_URL}/api`;
 function DPDashboard({ user, onLogout }) {
   const [exams, setExams] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [isImpersonating, setIsImpersonating] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [formData, setFormData] = useState({
     matricula: "",
     nome: "",
     data_desligamento: "",
   });
+  const [trello, setTrello] = useState({ loading: true, data: [], error: null });
+  const [pollingMs, setPollingMs] = useState(20000);
 
   useEffect(() => {
     fetchExams();
+    checkImpersonation();
+    fetchTrelloSnapshot();
+
+    const id = setInterval(() => {
+      fetchTrelloSnapshot(false);
+    }, pollingMs);
+    return () => clearInterval(id);
   }, []);
+
+  const checkImpersonation = async () => {
+    try {
+      const res = await axios.get(`${API}/auth/impersonation-status`);
+      setIsImpersonating(!!res.data?.is_impersonating);
+    } catch (e) {
+      setIsImpersonating(false);
+    }
+  };
+
+  const handleFinalize = async (exam) => {
+    if (exam.status === "FINALIZADO") return;
+    const ok = window.confirm(`Finalizar o exame de ${exam.nome}? Esta ação arquiva o card no Trello.`);
+    if (!ok) return;
+    try {
+      await axios.patch(`${API}/exams/${exam.id}`, { status: "FINALIZADO" });
+      await fetchExams();
+      alert("✅ Exame finalizado com sucesso!");
+    } catch (error) {
+      console.error("Error finalizing exam:", error);
+      const msg = error?.response?.data?.detail || "Erro ao finalizar exame.";
+      alert(`❌ ${msg}`);
+    }
+  };
+
+  const stopImpersonation = async () => {
+    try {
+      await axios.post(`${API}/auth/stop-impersonation`);
+      window.location.href = "/";
+    } catch (e) {
+      alert("Não foi possível voltar para administrador.");
+    }
+  };
 
   const fetchExams = async () => {
     try {
@@ -26,6 +69,16 @@ function DPDashboard({ user, onLogout }) {
       console.error("Error fetching exams:", error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchTrelloSnapshot = async (showLoading = true) => {
+    try {
+      if (showLoading) setTrello((prev) => ({ ...prev, loading: true, error: null }));
+      const res = await axios.get(`${API}/trello/board-snapshot`);
+      setTrello({ loading: false, data: res.data || [], error: null });
+    } catch (e) {
+      setTrello({ loading: false, data: [], error: "Falha ao carregar Trello" });
     }
   };
 
@@ -67,7 +120,7 @@ function DPDashboard({ user, onLogout }) {
   const getStatusLabel = (status) => {
     const labels = {
       CRIADO: "Criado",
-      EM_AGENDAMENTO: "Em Agendamento",
+      EM_AGENDAMENTO: "Agendado",
       AGUARDANDO_RESULTADO: "Aguardando Resultado",
       APTO: "Apto",
       INAPTO: "Inapto",
@@ -105,19 +158,87 @@ function DPDashboard({ user, onLogout }) {
                 <p className="text-sm text-gray-600">{user.name}</p>
               </div>
             </div>
-            <button
-              onClick={handleLogout}
-              data-testid="logout-button"
-              className="text-gray-600 hover:text-gray-900 font-medium"
-            >
-              Sair
-            </button>
+            <div className="flex items-center gap-3">
+              {isImpersonating && (
+                <button
+                  onClick={stopImpersonation}
+                  data-testid="stop-impersonation"
+                  className="text-purple-600 hover:text-purple-900 font-medium"
+                >
+                  Voltar para Admin
+                </button>
+              )}
+              <button
+                onClick={handleLogout}
+                data-testid="logout-button"
+                className="text-gray-600 hover:text-gray-900 font-medium"
+              >
+                Sair
+              </button>
+            </div>
           </div>
         </div>
       </div>
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Trello em tempo quase real */}
+        <div className="mb-8">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h2 className="text-2xl font-bold text-gray-900">Trello (tempo real)</h2>
+              <p className="text-gray-600 mt-1">Listas e cards diretamente do Trello</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => fetchTrelloSnapshot()}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700"
+              >
+                Atualizar agora
+              </button>
+            </div>
+          </div>
+
+          {trello.loading ? (
+            <div className="text-center py-8">
+              <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mx-auto"></div>
+            </div>
+          ) : trello.error ? (
+            <div className="bg-red-50 text-red-700 px-4 py-3 rounded-lg">{trello.error}</div>
+          ) : trello.data.length === 0 ? (
+            <div className="bg-white rounded-lg shadow p-6 text-center text-gray-600">Nenhuma lista encontrada</div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {trello.data.map((lst) => (
+                <div key={lst.id} className="bg-white rounded-lg shadow p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="font-semibold text-gray-900">{lst.name}</h3>
+                    <span className="text-xs text-gray-500">{(lst.cards || []).length} cards</span>
+                  </div>
+                  {(lst.cards || []).length === 0 ? (
+                    <div className="text-sm text-gray-500">Sem cards</div>
+                  ) : (
+                    <ul className="space-y-3 max-h-80 overflow-auto pr-1">
+                      {lst.cards.map((c) => (
+                        <li key={c.id} className="border border-gray-200 rounded-md p-3 hover:shadow-sm">
+                          <a href={c.url} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-blue-700 hover:underline">
+                            {c.name}
+                          </a>
+                          {c.desc && (
+                            <p className="text-xs text-gray-600 mt-1 whitespace-pre-line line-clamp-3">{c.desc}</p>
+                          )}
+                          {c.due && (
+                            <p className="text-xs text-gray-500 mt-1">Vencimento: {new Date(c.due).toLocaleString("pt-BR")}</p>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
         {/* Actions */}
         <div className="mb-6">
           <button
@@ -213,7 +334,7 @@ function DPDashboard({ user, onLogout }) {
                           {getStatusLabel(exam.status)}
                         </span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm space-x-3">
                         {exam.trello_card_url && (
                           <a
                             href={exam.trello_card_url}
@@ -224,6 +345,13 @@ function DPDashboard({ user, onLogout }) {
                             Ver no Trello
                           </a>
                         )}
+                        <button
+                          onClick={() => handleFinalize(exam)}
+                          disabled={exam.status === "FINALIZADO"}
+                          className={`font-medium ${exam.status === "FINALIZADO" ? "text-gray-400 cursor-not-allowed" : "text-green-700 hover:text-green-900"}`}
+                        >
+                          {exam.status === "FINALIZADO" ? "Finalizado" : "Finalizar"}
+                        </button>
                       </td>
                     </tr>
                   ))}
