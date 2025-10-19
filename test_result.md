@@ -162,7 +162,7 @@ frontend:
     file: "/app/frontend/src/App.js"
     stuck_count: 0
     priority: "medium"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: true
         agent: "main"
@@ -170,6 +170,9 @@ frontend:
       - working: "NA"
         agent: "main"
         comment: "Preparando testes de UI: tela de Login deve renderizar e botao de login existir. Sem autenticação real."
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTES DE UI CONCLUÍDOS COM SUCESSO: 1) Página de login renderiza corretamente na raiz (/) com todos os elementos obrigatórios: título 'Gerenciador de Exames', subtítulo 'Sistema de agendamento de exames demissionais', e botão com data-testid='google-login-button' contendo texto 'Entrar com Google'. 2) Redirecionamento de rota protegida (/dp/dashboard) funciona perfeitamente - usuários não autenticados são automaticamente redirecionados para a página de login (/). 3) Após redirecionamento, todos os elementos da página de login permanecem visíveis e funcionais. Console logs mostram 401 esperados para /api/auth/me (comportamento correto para usuários não autenticados). Interface responsiva e elementos visuais renderizando corretamente."
 metadata:
   created_by: "main_agent"
   version: "1.0"
