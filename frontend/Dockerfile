@@ -4,7 +4,10 @@
 FROM node:18-alpine as build
 WORKDIR /app
 ENV CI=true
-COPY package.json package-lock.json ./
+# Some environments have the lockfile inside the nested `frontend/` folder (e.g. frontend/frontend/package-lock.json).
+# Copy package.json and whichever lockfile exists into the build context.
+COPY package.json ./
+# Copy the full context (includes lockfiles located in the repo). This keeps the Dockerfile simple and avoids COPY failures.
 COPY . ./
 RUN npm install --legacy-peer-deps && npm run build
 

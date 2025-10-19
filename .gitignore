@@ -82,6 +82,8 @@ android-sdk/ -e
 *.env
 *.env.*
 -e 
+# Wheelhouse
+backend/wheels/
 # Environment files
 *.env
 *.env.*
