@@ -173,6 +173,9 @@ frontend:
       - working: true
         agent: "testing"
         comment: "✅ TESTES DE UI CONCLUÍDOS COM SUCESSO: 1) Página de login renderiza corretamente na raiz (/) com todos os elementos obrigatórios: título 'Gerenciador de Exames', subtítulo 'Sistema de agendamento de exames demissionais', e botão com data-testid='google-login-button' contendo texto 'Entrar com Google'. 2) Redirecionamento de rota protegida (/dp/dashboard) funciona perfeitamente - usuários não autenticados são automaticamente redirecionados para a página de login (/). 3) Após redirecionamento, todos os elementos da página de login permanecem visíveis e funcionais. Console logs mostram 401 esperados para /api/auth/me (comportamento correto para usuários não autenticados). Interface responsiva e elementos visuais renderizando corretamente."
+      - working: true
+        agent: "testing"
+        comment: "✅ VALIDAÇÃO DA NOVA UI MINIMALISTA CONCLUÍDA: Interface atualizada para design minimalista conforme solicitado. Página raiz (/) agora apresenta apenas card com botão Google (data-testid=google-login-button) sem títulos adicionais. Fundo com gradiente correto (bg-gradient-to-br from-indigo-50 via-white to-indigo-100) e card com efeito glass/blur (bg-white/90 backdrop-blur). Redirecionamento de rotas protegidas funcionando perfeitamente. Todos os requisitos da nova UI minimalista atendidos com sucesso."
 metadata:
   created_by: "main_agent"
   version: "1.0"
