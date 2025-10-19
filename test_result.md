@@ -162,23 +162,26 @@ frontend:
     file: "/app/frontend/src/App.js"
     stuck_count: 0
     priority: "medium"
-    needs_retesting: false
+    needs_retesting: true
     status_history:
       - working: true
         agent: "main"
         comment: "Frontend usa axios com withCredentials e prefixo /api."
+      - working: "NA"
+        agent: "main"
+        comment: "Preparando testes de UI: tela de Login deve renderizar e botao de login existir. Sem autenticação real."
 metadata:
   created_by: "main_agent"
   version: "1.0"
-  test_sequence: 2
-  run_ui: false
+  test_sequence: 3
+  run_ui: true
 
 test_plan:
   current_focus:
-    - "Testar autenticação e rotas protegidas (quando necessário)"
-    - "Testar CRUD Exames e integração Trello (quando env configurado)"
+    - "Testar UI de login: render inicial e botão 'Entrar com Google' visível"
+    - "Garantir que rota protegida (/dp/dashboard) redireciona para login quando não autenticado"
   stuck_tasks:
-    - "Autenticação externa poderá bloquear testes de rotas protegidas"
+    - "Fluxo de login real depende de provedor externo; não testar submissão real"
   test_all: false
   test_priority: "high_first"
 
@@ -187,3 +190,5 @@ agent_communication:
     message: "Ambiente preparado, serviços reiniciados. Solicito ao testing agent validar saúde do backend e rotas públicas conforme test_plan."
   - agent: "testing"
     message: "✅ Testes básicos do backend CONCLUÍDOS com sucesso. Todos os endpoints de saúde funcionando: /api/health, /api/health/ready, /api/. Conexão MongoDB validada. Ingress configurado corretamente. Corrigido bug no código que impedia /api/health/ready de funcionar (router inclusion estava antes da definição do endpoint). Backend está operacional e pronto para uso."
+  - agent: "main"
+    message: "Solicito ao testing agent executar testes de UI: 1) verificar render da tela de Login e presença do botão com data-testid=google-login-button; 2) acessar /dp/dashboard e confirmar redirecionamento de volta ao Login quando não autenticado. Não realizar login real nem navegar para domínios externos."
