@@ -1,0 +1,14 @@
+# Minimal requirements for Vercel Python serverless running FastAPI app in api/index.py
+fastapi==0.110.1
+starlette==0.37.2
+httpx==0.28.1
+anyio==4.11.0
+h11==0.16.0
+motor==3.3.1
+pymongo==4.5.0
+dnspython==2.8.0
+pydantic==2.12.0
+pydantic_core==2.41.1
+typing_extensions==4.15.0
+python-dotenv==1.1.1
+ 

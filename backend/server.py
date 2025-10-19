@@ -51,9 +51,19 @@ email_executor = ThreadPoolExecutor(max_workers=3)
 # Create the main app without a prefix
 app = FastAPI()
 
+# Configure CORS origins. If ALLOWED_ORIGINS env var exists, parse it as comma-separated list.
+# Otherwise, allow localhost dev origins by default. This lets frontend hosted on Vercel/Netlify
+# set REACT_APP_BACKEND_URL and the backend accept cross-origin requests.
+allowed = os.environ.get('ALLOWED_ORIGINS')
+if allowed:
+    # split and strip
+    allow_list = [o.strip() for o in allowed.split(',') if o.strip()]
+else:
+    allow_list = []
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[],
+    allow_origins=allow_list,
     allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+$)?",
     allow_credentials=True,
     allow_methods=["*"],

@@ -1,0 +1,19 @@
+# fly.toml - configuração para deploy no Fly.io (coloque na pasta backend)
+# Gere o arquivo com `fly launch` para preencher valores automaticamente, este é um template.
+app = "agendamento-backend"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  # Valores padrão, recomendável usar `fly secrets set` para variáveis sensíveis
+  DB_NAME = "agendamento"
+  COOKIE_SECURE = "true"
+
+[experimental]
+  allowed_public_ports = []
+
+# Observações:
+# - Configure segredos sensíveis com: fly secrets set MONGO_URL="..." TRELLO_API_KEY="..."
+# - Para deploy, rode `fly deploy` na pasta backend
+# - Ajuste a região no `fly launch` quando criar o app
