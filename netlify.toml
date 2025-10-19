@@ -8,7 +8,7 @@
 
 [[redirects]]
   from = "/api/*"
-  to = "https://enedina-matrilateral-gertude.ngrok-free.dev/:splat"
+  to = "https://agendamento-de-exames-demissionais.vercel.app/api/:splat"
   status = 200
   force = true
   # preserve_query is automatically handled by Netlify
