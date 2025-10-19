@@ -1,0 +1,51 @@
+name: CI - build & smoke
+
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Docker Compose
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y docker-compose
+
+      - name: Build images (backend, frontend)
+        run: docker compose build backend frontend
+
+      - name: Start services
+        run: docker compose up -d
+
+      - name: Wait for backend to be healthy
+        run: |
+          set -e
+          for i in $(seq 1 30); do
+            if curl -sSf http://localhost:8000/health > /dev/null; then
+              echo "backend is up"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "backend did not become ready" >&2
+          exit 1
+
+      - name: Smoke tests
+        run: |
+          echo "== /health =="
+          curl -sS -f http://localhost:8000/health
+          echo "\n== /api/health =="
+          curl -sS -f http://localhost:8000/api/health
+          echo "\n== frontend root =="
+          curl -sS -f http://localhost:3000/ | head -n 1
+
+      - name: Tear down
+        if: always()
+        run: docker compose down --remove-orphans
