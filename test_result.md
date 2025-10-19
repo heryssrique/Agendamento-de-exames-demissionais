@@ -125,11 +125,14 @@ backend:
     file: "/app/backend/server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: true
         agent: "main"
         comment: "Mongo inicializado via motor AsyncIOMotorClient; health/ready verifica ping."
+      - working: true
+        agent: "testing"
+        comment: "✅ Conexão MongoDB validada via /api/health/ready - retorna details.mongo.ok: true, confirmando conectividade com banco de dados."
   - task: "Autenticação e sessão (/api/auth/session, /api/auth/me)"
     implemented: true
     working: "NA"
