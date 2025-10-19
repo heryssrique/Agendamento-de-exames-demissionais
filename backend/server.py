@@ -1756,3 +1756,48 @@ async def shutdown_db_client():
 @app.get("/health")
 async def public_health_check():
     return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
+
+
+# Readiness endpoint: checks env and Mongo connectivity. Returns 200 when ready, 503 otherwise.
+@api_router.get("/health/ready")
+async def readiness_check_api():
+    return await _do_readiness_check()
+
+
+@app.get("/health/ready")
+async def readiness_check():
+    return await _do_readiness_check()
+
+
+async def _do_readiness_check():
+    details = {}
+    overall_ok = True
+
+    # Required environment vars
+    required_env = [
+        'MONGO_URL',
+        'DB_NAME',
+    ]
+    missing = [v for v in required_env if not os.environ.get(v)]
+    if missing:
+        details['env'] = {'ok': False, 'missing': missing}
+        overall_ok = False
+    else:
+        details['env'] = {'ok': True}
+
+    # Mongo ping
+    try:
+        # Motor's AsyncIOMotorClient exposes admin.command
+        await client.admin.command({'ping': 1})
+        details['mongo'] = {'ok': True}
+    except Exception as e:
+        details['mongo'] = {'ok': False, 'error': str(e)}
+        overall_ok = False
+
+    status = 200 if overall_ok else 503
+    payload = {
+        'status': 'ready' if overall_ok else 'unready',
+        'details': details,
+        'timestamp': datetime.now(timezone.utc).isoformat(),
+    }
+    return JSONResponse(status_code=status, content=payload)

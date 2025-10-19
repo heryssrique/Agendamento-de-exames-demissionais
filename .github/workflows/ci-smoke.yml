@@ -44,6 +44,8 @@ jobs:
           curl -sS -f http://localhost:8000/health
           echo "\n== /api/health =="
           curl -sS -f http://localhost:8000/api/health
+          echo "\n== /health/ready =="
+          curl -sS -f http://localhost:8000/health/ready
           echo "\n== frontend root =="
           curl -sS -f http://localhost:3000/ | head -n 1
 
