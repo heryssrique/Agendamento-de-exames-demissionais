@@ -1810,3 +1810,6 @@ async def _do_readiness_check():
         'timestamp': datetime.now(timezone.utc).isoformat(),
     }
     return JSONResponse(status_code=status, content=payload)
+
+# Include the router in the main app after all endpoints are defined
+app.include_router(api_router)
