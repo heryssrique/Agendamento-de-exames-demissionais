@@ -9,6 +9,7 @@ on:
 jobs:
   smoke:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -46,6 +47,23 @@ jobs:
           echo "\n== frontend root =="
           curl -sS -f http://localhost:3000/ | head -n 1
 
-      - name: Tear down
-        if: always()
-        run: docker compose down --remove-orphans
+        - name: Collect logs on failure
+          if: failure()
+          run: |
+            set -eux
+            mkdir -p ci-logs
+            docker compose ps --all > ci-logs/compose-ps.txt || true
+            docker compose logs --no-color --tail=500 > ci-logs/compose-logs.txt || true
+
+        - name: Upload logs artifact (on failure)
+          if: failure()
+          uses: actions/upload-artifact@v4
+          with:
+            name: ci-logs
+            path: ci-logs
+
+        - name: Tear down
+          if: always()
+          run: |
+            set -eux
+            docker compose down --remove-orphans || true
