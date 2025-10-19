@@ -49,6 +49,27 @@ jobs:
           echo "\n== frontend root =="
           curl -sS -f http://localhost:3000/ | head -n 1
 
+      - name: DB smoke test (insert/read)
+        run: |
+          set -eux
+          # Run a one-off command inside the backend image to exercise Mongo using pymongo
+          docker compose run --rm backend python - << 'PY'
+import os
+from pymongo import MongoClient
+url = os.environ.get('MONGO_URL', 'mongodb://mongo:27017')
+db_name = os.environ.get('DB_NAME', 'agendamento')
+client = MongoClient(url)
+db = client[db_name]
+col = db['ci_smoke_tests']
+col.insert_one({'_test': 'ok'})
+doc = col.find_one({'_test': 'ok'})
+if not doc:
+    raise SystemExit('failed to insert/read from mongo')
+print('db smoke passed')
+col.delete_many({'_test': 'ok'})
+client.close()
+PY
+
       - name: Collect logs on failure
         if: failure()
         run: |
