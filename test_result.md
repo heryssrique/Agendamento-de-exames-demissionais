@@ -101,3 +101,81 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+
+---
+user_problem_statement: "Explorar o projeto, instalar dependências, reiniciar serviços e rodar testes do backend."
+backend:
+  - task: "Revisar arquitetura e endpoints FastAPI"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Leitura do backend concluída; serviços reiniciados com supervisor. Pronto para testes de saúde e rotas principais."
+  - task: "Conexão MongoDB via MONGO_URL/DB_NAME"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Mongo inicializado via motor AsyncIOMotorClient; health/ready verifica ping."
+  - task: "Autenticação e sessão (/api/auth/session, /api/auth/me)"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Fluxo depende de sessão externa (Emergent Auth). Testar via endpoints básicos e dev-login caso ativado."
+  - task: "CRUD Exames e integração Trello"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Integração Trello requer env válidos; testar apenas endpoints sem acionar Trello inicialmente."
+frontend:
+  - task: "Configurar rotas e consumo de API com REACT_APP_BACKEND_URL"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/App.js"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Frontend usa axios com withCredentials e prefixo /api."
+metadata:
+  created_by: "main_agent"
+  version: "1.0"
+  test_sequence: 1
+  run_ui: false
+
+test_plan:
+  current_focus:
+    - "Testar endpoints de saúde: /health e /api/health"
+    - "Testar /api/health/ready e /api/"
+  stuck_tasks:
+    - "Autenticação externa poderá bloquear testes de rotas protegidas"
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+  - agent: "main"
+    message: "Ambiente preparado, serviços reiniciados. Solicito ao testing agent validar saúde do backend e rotas públicas conforme test_plan."
