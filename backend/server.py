@@ -1743,8 +1743,7 @@ async def root():
 async def health_check():
     return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
 
-# Include the router in the main app
-app.include_router(api_router)
+# Router will be included after all endpoints are defined
 
 app.add_middleware(
     CORSMiddleware,
