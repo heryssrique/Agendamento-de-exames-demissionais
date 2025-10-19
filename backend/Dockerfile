@@ -30,11 +30,14 @@ RUN apt-get update \
 # Copy requirements and install
 COPY requirements.txt ./requirements.txt
 COPY requirements-prod.txt ./requirements-prod.txt
+# Copy pre-downloaded wheels into the build context so we can install from them
+COPY wheels /wheels
 # Ensure pip, setuptools and wheel are up-to-date and install production requirements
 RUN set -eux; \
-    # Pin pip to a known stable 23.x release to avoid newer resolver/runtime regressions
-    python -m pip install pip==23.1.2 setuptools wheel; \
-    python -m pip install --no-cache-dir -r requirements-prod.txt
+    # Pin pip and resolver-related packages to stable versions to avoid resolver/runtime regressions
+    python -m pip install --upgrade pip==23.1.2 setuptools wheel packaging==23.1 resolvelib==0.9.0; \
+    # Install requirements using only the local wheelhouse so pip resolves deps from the manylinux wheels
+    python -m pip install --no-index --find-links=/wheels -r requirements-prod.txt
 
 # Copy app
 COPY . /app

@@ -1750,3 +1750,9 @@ app.add_middleware(
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
+
+
+# Public health endpoint (no /api prefix) so load balancers / k8s can probe /health
+@app.get("/health")
+async def public_health_check():
+    return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
