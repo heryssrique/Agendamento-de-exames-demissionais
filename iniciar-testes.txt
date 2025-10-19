@@ -5,4 +5,4 @@ backend: python -m uvicorn --host 0.0.0.0 --port 8000 --reload --reload-dir back
 frontend:   npm install --prefix .\frontend
             npm start --prefix .\frontend
 
-ngrok: ngrok http http://localhost:8000
+ngrok: ngrok http 8000

@@ -1,0 +1,10 @@
+[build]
+  functions = "netlify/functions"
+  publish = "frontend/build"
+
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/app"
+  status = 200
+  force = true
+  # preserve_query is automatically handled by Netlify
