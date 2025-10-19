@@ -14,7 +14,9 @@
     "start-frontend": "yarn --cwd ./frontend start",
     "test-frontend": "yarn --cwd ./frontend test",
     "start": "yarn start-frontend",
-    "build": "yarn build-frontend"
+    "build": "yarn build-frontend",
+    "vercel-build": "yarn build-frontend",
+    "postinstall": "yarn --cwd ./frontend install"
   },
   "repository": {
     "type": "git",
