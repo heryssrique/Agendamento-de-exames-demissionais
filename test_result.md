@@ -185,3 +185,5 @@ test_plan:
 agent_communication:
   - agent: "main"
     message: "Ambiente preparado, serviços reiniciados. Solicito ao testing agent validar saúde do backend e rotas públicas conforme test_plan."
+  - agent: "testing"
+    message: "✅ Testes básicos do backend CONCLUÍDOS com sucesso. Todos os endpoints de saúde funcionando: /api/health, /api/health/ready, /api/. Conexão MongoDB validada. Ingress configurado corretamente. Corrigido bug no código que impedia /api/health/ready de funcionar (router inclusion estava antes da definição do endpoint). Backend está operacional e pronto para uso."
