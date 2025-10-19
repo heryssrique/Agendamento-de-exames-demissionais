@@ -1,3 +1,20 @@
+Como regenerar o wheelhouse (wheels local) usado pelo Docker
+
+Este repositório usa um diretório `backend/wheels/` contendo wheels manylinux para evitar falhas de build dentro do container (resolvendo segfaults/compilações nativas). Nunca comite o conteúdo de `backend/wheels/` — o diretório está no `.gitignore`.
+
+Comando reproducível (executar no host, no diretório raiz do projeto):
+
+```powershell
+python -m pip download -r backend/requirements-prod.txt -d backend/wheels \
+  --platform manylinux2014_x86_64 --only-binary=:all: --implementation cp --abi cp311 -i https://pypi.org/simple
+```
+
+Notas:
+- Use uma máquina Linux ou WSL2 com Python 3.11 para garantir que as wheels manylinux baixadas sejam compatíveis com a imagem base `python:3.11-bullseye`.
+- Se o PyPI não oferecer uma wheel binária para certa dependência, você poderá precisar baixar manualmente a wheel adequada ou escolher uma versão com wheel manylinux para CPython 3.11.
+- Não commite `backend/wheels/`. Em CI, considere gerar as wheels como artefato ou publicar um pacote interno.
+
+Se precisar, posso incluir um script `scripts/regenerate_wheels.ps1` para automatizar este passo no Windows/WSL.
 Como regenerar o wheelhouse (wheels) usado no Docker build
 ---------------------------------------------------------
 
