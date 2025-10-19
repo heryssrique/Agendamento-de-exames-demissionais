@@ -181,8 +181,8 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Testar UI de login: render inicial e botão 'Entrar com Google' visível"
-    - "Garantir que rota protegida (/dp/dashboard) redireciona para login quando não autenticado"
+    - "Autenticação e sessão (/api/auth/session, /api/auth/me)"
+    - "CRUD Exames e integração Trello"
   stuck_tasks:
     - "Fluxo de login real depende de provedor externo; não testar submissão real"
   test_all: false
