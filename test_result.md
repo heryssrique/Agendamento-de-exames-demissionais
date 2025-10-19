@@ -175,8 +175,8 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Testar endpoints de saúde: /health e /api/health"
-    - "Testar /api/health/ready e /api/"
+    - "Testar autenticação e rotas protegidas (quando necessário)"
+    - "Testar CRUD Exames e integração Trello (quando env configurado)"
   stuck_tasks:
     - "Autenticação externa poderá bloquear testes de rotas protegidas"
   test_all: false
