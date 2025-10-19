@@ -53,7 +53,7 @@ try {
 }
 
 # Buscar PRs abertos para este head
-$queryUri = "https://api.github.com/repos/$owner/$repo/pulls?head=$owner`:$branch&state=open"
+$queryUri = "https://api.github.com/repos/$owner/$repo/pulls?head=$($owner):$($branch)&state=open"
 try {
     $prs = Invoke-RestMethod -Uri $queryUri -Headers $headers -Method Get -ErrorAction Stop
     if ($prs -and $prs.Count -gt 0) {
@@ -62,7 +62,7 @@ try {
         Start-Process $pr.html_url
         exit 0
     } else {
-        Write-Error "Nenhum PR encontrado para head $owner:$branch e criação falhou. Verifique permissões e tente manualmente."; exit 1
+    Write-Error "Nenhum PR encontrado para head $($owner):$($branch) e criação falhou. Verifique permissões e tente manualmente."; exit 1
     }
 } catch {
     Write-Error "Erro ao buscar PRs: $_"; exit 1
