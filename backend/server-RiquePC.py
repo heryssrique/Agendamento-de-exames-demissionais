@@ -317,7 +317,7 @@ class EmailService:
                 
                 <p style="margin-top: 20px;">Por favor, acesse o sistema para agendar o exame.</p>
                 
-                <a href="https://trello-integra.preview.emergentagent.com" 
+                <a href="https://analise-detalhada.preview.emergentagent.com" 
                    style="display: inline-block; background-color: #4F46E5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin-top: 10px;">
                     Acessar Sistema
                 </a>
@@ -348,7 +348,7 @@ class EmailService:
                 
                 {f'<p><strong>Observações:</strong> {exam.get("observacoes", "")}</p>' if exam.get('observacoes') else ''}
                 
-                <a href="https://trello-integra.preview.emergentagent.com" 
+                <a href="https://analise-detalhada.preview.emergentagent.com" 
                    style="display: inline-block; background-color: #059669; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin-top: 10px;">
                     Ver Detalhes
                 </a>
@@ -402,7 +402,7 @@ class EmailService:
                     {f"<p><strong>Data de Agendamento:</strong> {exam.get('data_agendamento')}</p>" if exam.get('data_agendamento') else ''}
                     {f"<p><strong>Observações:</strong> {exam.get('observacoes')}</p>" if exam.get('observacoes') else ''}
                 </div>
-                <a href=\"https://trello-integra.preview.emergentagent.com\" 
+                <a href=\"https://analise-detalhada.preview.emergentagent.com\" 
                    style=\"display: inline-block; background-color: #4F46E5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px;\">
                     Abrir Sistema
                 </a>
@@ -443,7 +443,7 @@ class EmailService:
                 
                 <p style="margin-top: 20px;">Acesse o sistema para mais detalhes e finalize o processo.</p>
                 
-                <a href="https://trello-integra.preview.emergentagent.com" 
+                <a href="https://analise-detalhada.preview.emergentagent.com" 
                    style="display: inline-block; background-color: {result_color}; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin-top: 10px;">
                     Acessar Sistema
                 </a>
