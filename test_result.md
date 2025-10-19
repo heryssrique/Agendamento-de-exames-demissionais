@@ -111,11 +111,14 @@ backend:
     file: "/app/backend/server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: true
         agent: "main"
         comment: "Leitura do backend concluída; serviços reiniciados com supervisor. Pronto para testes de saúde e rotas principais."
+      - working: true
+        agent: "testing"
+        comment: "✅ Todos os endpoints de saúde testados com sucesso: /api/health (200 OK), /api/health/ready (200 OK com details.env e details.mongo), /api/ (200 OK com message). Ingress funcionando corretamente - rotas /api vão para backend, outras para frontend. Corrigido bug no router inclusion que impedia /api/health/ready de funcionar."
   - task: "Conexão MongoDB via MONGO_URL/DB_NAME"
     implemented: true
     working: true
