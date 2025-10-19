@@ -1,0 +1,27 @@
+# render.yaml - configuração opcional para deploy no Render.com
+# Substitua os valores PLACEHOLDER pelos reais (não adicione segredos no arquivo se preferir usar o painel)
+services:
+  - type: web
+    name: agendamento-backend
+    env: docker
+    dockerfilePath: backend/Dockerfile
+    plan: starter
+    autoDeploy: true
+    instanceCount: 1
+    healthCheckPath: /health
+    envVars:
+      - key: MONGO_URL
+        value: "PLACEHOLDER_MONGO_URL"
+      - key: DB_NAME
+        value: "agendamento"
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: ALLOWED_ORIGINS
+        value: "https://app.seudominio.com"
+      - key: DEV_AUTH_ENABLED
+        value: "false"
+      # Adicione outras variáveis necessárias como TRELLO_API_KEY, SMTP_*, ADMIN_EMAILS, etc.
+
+# Nota: Para segurança, prefira configurar variáveis de ambiente sensíveis no painel do Render
+# em vez de commitar neste arquivo. Este arquivo serve para deploy via Git quando você quer
+# que o Render leia a configuração do repositório.

@@ -1,0 +1,28 @@
+name: Deploy to Render
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - release/**
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Deploy to Render (GitHub integration)
+        uses: render-examples/deploy-to-render@v1
+        with:
+          api_key: ${{ secrets.RENDER_API_KEY }}
+          service_id: ${{ secrets.RENDER_SERVICE_ID }}
+          branch: ${{ github.ref_name }}
+
+# Notes:
+# - This workflow assumes you have a Render service connected to the repo and you use the Render API key.
+# - Alternatively, you can rely on Render's automatic GitHub integration, and skip this action.
