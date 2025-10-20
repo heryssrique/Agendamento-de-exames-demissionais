@@ -102,3 +102,7 @@ backend/wheels/
 
 # Local Netlify folder
 .netlify
+-e 
+# Environment files
+*.env
+*.env.*
