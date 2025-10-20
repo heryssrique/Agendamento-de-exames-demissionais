@@ -1745,16 +1745,8 @@ async def health_check():
 
 # Router will be included after all endpoints are defined
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# CORS para produção é controlado via ALLOWED_ORIGINS no topo do arquivo.
+# Removido o middleware duplicado/fixo para evitar conflitos em produção.
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
