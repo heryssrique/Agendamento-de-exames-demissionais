@@ -1,0 +1,32 @@
+{
+  "name": "agendamento-de-exames-demissionais",
+  "version": "1.0.0",
+  "description": "Necessita de arquivos .env com dados sensiveis",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "install-frontend": "yarn --cwd ./frontend install",
+    "build-frontend": "yarn --cwd ./frontend build",
+    "start-frontend": "yarn --cwd ./frontend start",
+    "test-frontend": "yarn --cwd ./frontend test",
+    "start": "yarn start-frontend",
+    "build": "yarn build-frontend",
+    "vercel-build": "yarn build-frontend",
+    "postinstall": "yarn --cwd ./frontend install"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/heryssrique/Agendamento-de-exames-demissionais.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/heryssrique/Agendamento-de-exames-demissionais/issues"
+  },
+  "homepage": "https://github.com/heryssrique/Agendamento-de-exames-demissionais#readme"
+}

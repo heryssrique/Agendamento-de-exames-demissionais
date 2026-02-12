@@ -6,6 +6,8 @@ Este documento descreve passo-a-passo como publicar a aplicação "Agendamento d
 
 IMPORTANTE: nunca comite senhas e URIs com credenciais no repositório. Use secrets/variáveis de ambiente do provedor.
 
+Nota: este repositório agora inclui `backend/.env.example` e `frontend/.env.production.example` como modelos. Não comite arquivos `.env` com credenciais — configure-os como secrets no provedor (Render/Fly/Vercel/Netlify) ou mantenha localmente e fora do controle de versão.
+
 ---
 
 ## Resumo rápido
@@ -228,8 +230,60 @@ Para Render (`deploy-render.yml`):
 Para Fly (`deploy-fly.yml`):
 - `FLY_API_TOKEN` — token criado no Fly (Settings -> Personal Tokens)
 
+Para Vercel (`deploy-frontend-vercel.yml`):
+- `VERCEL_TOKEN` — crie um token de deploy no painel Vercel (Account -> Tokens) e adicione como Secret no GitHub (Repository -> Settings -> Secrets & variables -> Actions)
+
 Observações:
 - Ainda é recomendado usar o painel do provedor para variáveis sensíveis do runtime (MONGO_URL, SMTP, etc.).
 - Os workflows disparam em push para branches `main`, `master` ou `release/**`.
 
 Se quiser, posso adaptar os workflows para rodar apenas em tags ou em pull-requests aprovados.
+
+### Deploy automático do Frontend (Vercel)
+
+Adicione o arquivo `.github/workflows/deploy-frontend.yml` (já incluído) para que o CI construa o frontend e faça deploy no Vercel.
+
+Secrets necessários no GitHub:
+- `VERCEL_TOKEN` — token de deploy (crie em https://vercel.com/account/tokens)
+- `REACT_APP_BACKEND_URL` — URL pública do backend que será embutida no build
+
+Como funciona:
+- O workflow instala dependências em `frontend/`, executa `npm run build` com `REACT_APP_BACKEND_URL` passado como variável de ambiente, e então usa a CLI do Vercel para publicar em produção (`--prod`).
+
+Observação: se preferir que o Vercel faça o build no próprio painel (em vez de pelo Action), você só precisa configurar a variável `REACT_APP_BACKEND_URL` no painel do Vercel.
+
+---
+
+## Deploy automático do Frontend via GitHub Actions (passo-a-passo)
+
+Se você preferir que o GitHub Actions faça o build e publique no Vercel automaticamente, siga estes passos:
+
+1) Crie um token no Vercel
+
+   - Acesse https://vercel.com/account/tokens e crie um novo "Personal Token" (ou "Deploy Token"). Copie o valor gerado.
+
+2) Adicione o token como GitHub Secret
+
+   - No GitHub, abra o repositório → Settings → Secrets and variables → Actions → New repository secret.
+   - Nomeie o secret `VERCEL_TOKEN` e cole o token do Vercel.
+
+3) (Opcional) Variáveis de build do frontend
+
+   - Se o frontend precisa do `REACT_APP_BACKEND_URL` no momento do build, adicione-o também como Secret no GitHub (por exemplo `REACT_APP_BACKEND_URL`) ou configure-o no painel do Vercel.
+
+4) Como o workflow é acionado
+
+   - O workflow `.github/workflows/deploy-frontend-vercel.yml` já presente no repositório é disparado em push para `main`, `master` ou `release/**`.
+   - Para forçar um deploy: faça um commit e push para uma dessas branches.
+   - Acompanhe a execução em GitHub → Actions → "Deploy Frontend to Vercel".
+
+5) Verificação pós-deploy
+
+   - Após o job concluir com sucesso, o Vercel publicará a versão em produção (`--prod` é utilizado pela action).
+   - Verifique o site em `https://<seu-projeto>.vercel.app` (ou no domínio custom que você configurou).
+
+6) Segurança
+
+   - Nunca adicione tokens ao código fonte. Use sempre GitHub Secrets ou as configurações de variáveis do provedor.
+   - Caso precise revogar o token, gere um novo em https://vercel.com/account/tokens e atualize o Secret no GitHub.
+
